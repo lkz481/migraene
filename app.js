@@ -7,6 +7,8 @@
 const STORE_KEY = 'migraene-tagebuch-v1';
 const PBKDF2_ITER = 310000;            // Schlüsselableitung für PIN und Backup-Passwort
 const AUTOLOCK_MS = 5 * 60 * 1000;     // mit PIN: nach 5 Min. im Hintergrund wieder sperren
+const STALE_MS = 24 * 3600 * 1000;     // nach 24 Std. nachfragen, ob eine Attacke noch läuft
+const LONG_MS = 72 * 3600 * 1000;      // ab 72 Std. ärztlich abklären (Status migränosus)
 
 const LOCATIONS = ['Links', 'Rechts', 'Beidseitig', 'Stirn', 'Schläfe', 'Hinter dem Auge', 'Hinterkopf', 'Nacken'];
 const SYMPTOMS = ['Übelkeit', 'Erbrechen', 'Lichtempfindlich', 'Lärmempfindlich', 'Geruchsempfindlich',
@@ -166,6 +168,7 @@ function sanitizeState(raw) {
     const aura = typeof a.aura === 'boolean' ? a.aura : (symptoms.includes('Aura') ? true : null);
     return {
       id: freshId(a.id, attIds), start, end, aura,
+      checkedAt: end ? null : isoOrNull(a.checkedAt),
       intensity: Math.round(num(a.intensity, 0, 10) || 0),
       impairment: imp === null ? null : Math.round(imp),
       locations: strList(a.locations), symptoms: symptoms.filter(x => x !== 'Aura'), triggers: strList(a.triggers),
@@ -1092,6 +1095,106 @@ function flowClick(t) {
   return false;
 }
 
+/* ---------- Vergessene Attacken abfangen ----------
+   Läuft eine Attacke seit über 24 Std. (bzw. 24 Std. seit der letzten Bestätigung),
+   fragt die App beim Öffnen nach. Nichts wird ohne Rückfrage automatisch beendet. */
+
+let stale = null;   // { id, step: 'ask' | 'when' }
+
+function fmtSpan(ms) {
+  const h = Math.floor(ms / 3600000);
+  if (h < 24) return `${h} ${plural(h, 'Stunde', 'Stunden')}`;
+  const d = Math.floor(h / 24), r = h % 24;
+  return `${d} ${plural(d, 'Tag', 'Tagen')}${r ? ` ${r} Std.` : ''}`;
+}
+
+function checkStale() {
+  if (stale || flow || draft || !$('#sheet').hidden || $('.dlg-wrap') || $('.lock') || !$('#report').hidden) return;
+  const a = activeAttack();
+  if (!a) return;
+  const since = new Date(a.checkedAt || a.start).getTime();
+  if (Date.now() - since < STALE_MS) return;
+  stale = { id: a.id, step: 'ask' };
+  renderStale();
+}
+
+function renderStale() {
+  const a = state.attacks.find(x => x.id === stale.id);
+  if (!a) { stale = null; closeSheet(); return; }
+  const startMs = new Date(a.start).getTime();
+  const sheet = $('#sheet');
+  if (stale.step === 'ask') {
+    sheet.innerHTML = `<div class="sheet-inner flow">
+      <h2 class="flow-q">Läuft deine Attacke noch?</h2>
+      <p class="muted">Begonnen ${fmtDateTime(a.start)} – das ist ${fmtSpan(Date.now() - startMs)} her. Vielleicht wurde vergessen, sie zu beenden.</p>
+      <div class="flow-choices">
+        <button class="choice" data-stale="over">Nein, ist schon vorbei</button>
+        <button class="choice" data-stale="still">Ja, sie läuft noch</button>
+      </div>
+    </div>`;
+  } else {
+    // Vorschläge: typische Dauern ab Beginn, nur wenn sie schon in der Vergangenheit liegen
+    const opts = [[2, '2 Std.'], [4, '4 Std.'], [8, '8 Std.'], [12, '12 Std.'], [24, '1 Tag'], [48, '2 Tage'], [72, '3 Tage']]
+      .map(([h, label]) => ({ t: startMs + h * 3600000, label }))
+      .filter(o => o.t < Date.now() - 30 * 60000);
+    sheet.innerHTML = `<div class="sheet-inner flow">
+      <div class="flow-head"><button class="btn ghost" data-stale="back">‹ Zurück</button><span></span><span></span></div>
+      <h2 class="flow-q">Wann ungefähr war sie vorbei?</h2>
+      <p class="muted">Begonnen ${fmtDateTime(a.start)}. Wie lange hat sie ungefähr gedauert?</p>
+      <div class="flow-choices stale-grid">${opts.map(o =>
+        `<button class="choice" data-stale="end" data-t="${o.t}">${o.label}<small>bis ${fmtDate(o.t)}, ${fmtTime(o.t)}</small></button>`).join('')}</div>
+      <div class="field"><label for="stale-end">Oder genaue Zeit</label>
+        <input type="datetime-local" id="stale-end" min="${toLocalInput(a.start)}" max="${toLocalInput(new Date())}" value="${toLocalInput(new Date(Math.min(Date.now(), startMs + 4 * 3600000)))}"></div>
+      <button class="btn block" data-stale="endexact">Diese Zeit übernehmen</button>
+    </div>`;
+  }
+  sheet.hidden = false;
+  sheet.scrollTop = 0;
+  document.body.style.overflow = 'hidden';
+}
+
+function finishStale(a, endMs) {
+  const end = Math.min(Math.max(endMs, new Date(a.start).getTime()), Date.now());
+  a.end = new Date(end).toISOString();
+  a.checkedAt = null;
+  save();
+  stale = null;
+  $('#sheet').hidden = true; $('#sheet').innerHTML = '';
+  render();
+  dialog(`Gespeichert: Dauer ${fmtDuration(a)}. Möchtest du noch etwas ergänzen – Einschränkung, Schmerzort, Auslöser, Notiz?`, { okText: 'Ja, ergänzen', cancelText: 'Nein, fertig' })
+    .then(more => { if (more) openFlow(a.id, 'end'); else { document.body.style.overflow = ''; toast('Alles gespeichert'); } });
+}
+
+function staleClick(t) {
+  const a = state.attacks.find(x => x.id === stale.id);
+  if (!a) { stale = null; closeSheet(); return true; }
+  switch (t.dataset.stale) {
+    case 'still': {
+      a.checkedAt = new Date().toISOString();
+      save();
+      stale = null;
+      closeSheet();
+      if (Date.now() - new Date(a.start).getTime() > LONG_MS) {
+        dialog('Deine Attacke läuft seit über 72 Stunden. Eine so lange Migräne (Status migränosus) sollte ärztlich abgeklärt werden – bitte melde dich bei deiner Ärztin oder deinem Arzt oder beim ärztlichen Bereitschaftsdienst (116 117).', { okText: 'Verstanden', cancelText: 'Schließen' });
+      } else toast('Okay – ich frage morgen noch einmal nach.');
+      return true;
+    }
+    case 'over': stale.step = 'when'; renderStale(); return true;
+    case 'back': stale.step = 'ask'; renderStale(); return true;
+    case 'end': finishStale(a, +t.dataset.t); return true;
+    case 'endexact': {
+      const v = $('#stale-end').value;
+      if (!v) { toast('Bitte eine Zeit wählen.'); return true; }
+      const ms = new Date(v).getTime();
+      if (ms < new Date(a.start).getTime()) { toast('Das Ende liegt vor dem Beginn.'); return true; }
+      if (ms > Date.now()) { toast('Das Ende liegt in der Zukunft.'); return true; }
+      finishStale(a, ms);
+      return true;
+    }
+  }
+  return false;
+}
+
 /* ---------- Formular: Medikament ---------- */
 
 let medReturn = null;   // 'attack' | 'flow' – wohin nach dem Anlegen eines Medikaments
@@ -1233,6 +1336,7 @@ let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) hiddenAt = Date.now();
   else if (vault && hiddenAt && Date.now() - hiddenAt > AUTOLOCK_MS) lockNow();
+  else checkStale();
 });
 
 /* ---------- Backup (immer verschlüsselt) ---------- */
@@ -1386,6 +1490,9 @@ document.addEventListener('click', e => {
   const act = t.dataset.act;
   const id = t.dataset.id;
 
+  // Nachfrage zu einer vergessenen Attacke
+  if (stale && t.dataset.stale && staleClick(t)) return;
+
   // Geführte Erfassung
   if (flow && t.closest('#sheet') && !medReturn && flowClick(t)) return;
 
@@ -1465,7 +1572,7 @@ document.addEventListener('click', e => {
     case 'end': {
       const a = state.attacks.find(x => x.id === id);
       if (!a) break;
-      a.end = new Date().toISOString(); save(); render();
+      a.end = new Date().toISOString(); a.checkedAt = null; save(); render();
       dialog('Attacke beendet. Möchtest du noch etwas ergänzen – Einschränkung, Schmerzort, Auslöser, Notiz?', { okText: 'Ja, ergänzen', cancelText: 'Nein, fertig' })
         .then(more => { if (more) openFlow(a.id, 'end'); else toast('Alles gespeichert – gute Erholung'); });
       break;
@@ -1617,6 +1724,7 @@ function onboarding() {
 function start() {
   render();
   if (!state.settings.onboarded) onboarding();
+  else checkStale();
 }
 
 (function boot() {
@@ -1627,7 +1735,11 @@ function start() {
   start();
 })();
 
-setInterval(() => { if (tab === 'home' && $('#sheet').hidden && !$('.lock') && activeAttack()) render(); }, 60000);
+setInterval(() => {
+  if ($('.lock')) return;
+  if (tab === 'home' && $('#sheet').hidden && activeAttack()) render();
+  checkStale();
+}, 60000);
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
