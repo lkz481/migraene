@@ -524,6 +524,7 @@ function openAttack(id, focusMeds) {
     locations: [], symptoms: [], triggers: [], meds: [], notes: ''
   };
   draft._new = !existing;
+  draft._open = {};
   if (!existing) draft.end = new Date().toISOString();
   renderAttackSheet();
   if (focusMeds) setTimeout(() => $('#meds-anchor')?.scrollIntoView({ behavior: 'smooth' }), 50);
@@ -545,20 +546,18 @@ function renderAttackSheet() {
     <div class="sheet-head"><h2>${d._new ? 'Neue Attacke' : 'Attacke'}</h2>
       <button class="btn ghost" data-act="close">Abbrechen</button></div>
 
+    <div class="field"><span class="lbl">Symptome</span>${chipsHTML('symptoms', SYMPTOMS, d.symptoms)}</div>
+
+    <div class="field"><span class="lbl">Stärke (1 = leicht, 10 = unerträglich)</span>
+      <div class="scale">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n =>
+        `<button type="button" data-pain="${n}" aria-pressed="${d.intensity === n}" style="${d.intensity === n ? `background:${painColor(n)}` : ''}">${n}</button>`).join('')}</div></div>
+
     <div class="field"><label for="f-start">Beginn</label>
       <input type="datetime-local" id="f-start" value="${toLocalInput(d.start)}"></div>
 
     <div class="field"><span class="lbl">Ende</span>
       <div class="chips"><button type="button" class="chip" id="f-running" aria-pressed="${running}">Läuft noch</button></div>
       <input type="datetime-local" id="f-end" value="${d.end ? toLocalInput(d.end) : ''}" ${running ? 'hidden' : ''}></div>
-
-    <div class="field"><span class="lbl">Stärke (1 = leicht, 10 = unerträglich)</span>
-      <div class="scale">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n =>
-        `<button type="button" data-pain="${n}" aria-pressed="${d.intensity === n}" style="${d.intensity === n ? `background:${painColor(n)}` : ''}">${n}</button>`).join('')}</div></div>
-
-    <div class="field"><span class="lbl">Wo?</span>${chipsHTML('locations', LOCATIONS, d.locations)}</div>
-    <div class="field"><span class="lbl">Symptome</span>${chipsHTML('symptoms', SYMPTOMS, d.symptoms)}</div>
-    <div class="field"><span class="lbl">Mögliche Auslöser</span>${chipsHTML('triggers', TRIGGERS, d.triggers)}</div>
 
     <div class="field" id="meds-anchor"><span class="lbl">Medikamente</span>
       <div class="list">${d.meds.map((m, i) => `
@@ -574,12 +573,21 @@ function renderAttackSheet() {
         : `<button type="button" class="btn" data-act="newmed-inline">+ Medikament anlegen</button>`}
     </div>
 
-    <div class="field"><span class="lbl">Wetter beim Beginn</span>
-      <div id="f-weather">${weatherHTML(d.weather)}</div>
-      ${state.settings.weather ? `<button type="button" class="btn ghost" data-act="loadweather" style="justify-self:start">Wetter jetzt laden</button>` : ''}</div>
+    <div class="field"><span class="lbl">Wo?</span>${chipsHTML('locations', LOCATIONS, d.locations)}</div>
 
-    <div class="field"><label for="f-notes">Notizen</label>
-      <textarea id="f-notes" placeholder="Was war heute anders? Was hat geholfen?">${esc(d.notes)}</textarea></div>
+    <details class="fold" data-fold="triggers" ${d._open.triggers ? 'open' : ''}>
+      <summary><span>Mögliche Auslöser</span><span class="fold-info" id="fold-triggers">${d.triggers.length ? d.triggers.length + ' gewählt' : ''}</span></summary>
+      ${chipsHTML('triggers', TRIGGERS, d.triggers)}
+    </details>
+
+    <details class="fold" data-fold="extra" ${d._open.extra ? 'open' : ''}>
+      <summary><span>Wetter & Notizen</span><span class="fold-info">${d.notes ? 'Notiz vorhanden' : ''}</span></summary>
+      <div class="field"><span class="lbl">Wetter beim Beginn</span>
+        <div id="f-weather">${weatherHTML(d.weather)}</div>
+        ${state.settings.weather ? `<button type="button" class="btn ghost" data-act="loadweather" style="justify-self:start">Wetter jetzt laden</button>` : ''}</div>
+      <div class="field"><label for="f-notes">Notizen</label>
+        <textarea id="f-notes" placeholder="Was war heute anders? Was hat geholfen?">${esc(d.notes)}</textarea></div>
+    </details>
 
     ${!d._new ? `<button type="button" class="btn danger" data-act="delete">Eintrag löschen</button>` : ''}
   </div>
@@ -607,7 +615,7 @@ function saveAttack() {
   if (!draft.end && state.attacks.some(a => !a.end && a.id !== draft.id)) {
     toast('Es läuft schon eine andere Attacke.'); return;
   }
-  const { _new, ...clean } = draft;
+  const { _new, _open, ...clean } = draft;
   const idx = state.attacks.findIndex(a => a.id === clean.id);
   const startHour = `${dayKey(clean.start)}T${pad(new Date(clean.start).getHours())}:00`;
   const needWeather = !clean.weather || clean.weather.for !== startHour;
@@ -826,6 +834,7 @@ document.addEventListener('click', e => {
       const on = t.getAttribute('aria-pressed') !== 'true';
       t.setAttribute('aria-pressed', on);
       draft[g] = on ? [...draft[g], v] : draft[g].filter(x => x !== v);
+      if (g === 'triggers') $('#fold-triggers').textContent = draft.triggers.length ? draft.triggers.length + ' gewählt' : '';
       return;
     }
     if (t.dataset.addchip) {
@@ -936,6 +945,10 @@ document.addEventListener('click', e => {
     case 'ob-weather': t.setAttribute('aria-pressed', t.getAttribute('aria-pressed') !== 'true'); t.textContent = t.getAttribute('aria-pressed') === 'true' ? 'An' : 'Aus'; break;
   }
 });
+
+document.addEventListener('toggle', e => {
+  if (draft && e.target.dataset && e.target.dataset.fold) draft._open[e.target.dataset.fold] = e.target.open;
+}, true);
 
 document.addEventListener('input', e => {
   if (e.target.id !== 'm-search') return;

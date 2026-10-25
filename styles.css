@@ -222,3 +222,18 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .sugg { display: grid; gap: 12px; max-height: 340px; overflow-y: auto; padding: 2px; }
 .sugg-group { display: grid; gap: 6px; }
 .sugg .chip { font-size: 14px; padding: 8px 12px; min-height: 40px; }
+
+/* Einklappbare Bereiche */
+.fold { background: var(--surface); border-radius: 14px; padding: 0 14px; }
+.fold > summary {
+  list-style: none; cursor: pointer; min-height: 54px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  font-size: 16px;
+}
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::after { content: '›'; color: var(--muted); font-size: 22px; transition: transform .2s; }
+.fold[open] > summary::after { transform: rotate(90deg); }
+.fold > summary .fold-info { margin-left: auto; font-size: 14px; color: var(--accent); }
+.fold[open] { padding-bottom: 14px; display: grid; gap: 14px; }
+.fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) { .fold > summary::after { transition: none; } }
