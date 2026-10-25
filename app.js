@@ -19,6 +19,20 @@ const MED_TYPES = {
   prophylaxe: 'Prophylaxe (täglich)',
   sonstiges: 'Sonstiges'
 };
+// Vorschläge beim Anlegen – gängige Dosierungen, kann jederzeit angepasst werden
+const MED_SUGGESTIONS = {
+  triptan: ['Sumatriptan 50 mg', 'Sumatriptan 100 mg', 'Sumatriptan Nasenspray 20 mg', 'Sumatriptan Spritze 6 mg',
+    'Rizatriptan 10 mg', 'Rizatriptan Schmelztablette 10 mg', 'Zolmitriptan 2,5 mg', 'Zolmitriptan 5 mg',
+    'Zolmitriptan Nasenspray 5 mg', 'Naratriptan 2,5 mg', 'Eletriptan 40 mg', 'Almotriptan 12,5 mg', 'Frovatriptan 2,5 mg'],
+  analgetikum: ['Ibuprofen 400 mg', 'Ibuprofen 600 mg', 'Paracetamol 500 mg', 'Paracetamol 1000 mg', 'ASS 500 mg',
+    'ASS 1000 mg', 'Naproxen 500 mg', 'Diclofenac 50 mg', 'Metamizol (Novalgin) 500 mg', 'Thomapyrin (ASS + Paracetamol + Coffein)'],
+  antiemetikum: ['Metoclopramid (MCP) 10 mg', 'Domperidon 10 mg', 'Dimenhydrinat (Vomex) 50 mg'],
+  prophylaxe: ['Metoprolol', 'Propranolol', 'Topiramat', 'Amitriptylin', 'Flunarizin', 'Candesartan',
+    'Erenumab (Aimovig)', 'Fremanezumab (Ajovy)', 'Galcanezumab (Emgality)', 'Eptinezumab (Vyepti)', 'Botox-Injektionen', 'Magnesium'],
+  sonstiges: ['Rimegepant (Vydura) 75 mg', 'Lasmiditan (Rayvow) 100 mg']
+};
+const SUGG_GROUPS = { triptan: 'Triptane', analgetikum: 'Schmerzmittel', antiemetikum: 'Gegen Übelkeit', prophylaxe: 'Prophylaxe', sonstiges: 'Weitere Akutmittel' };
+
 const EFFECTS = ['Keine', 'Etwas', 'Gut', 'Sehr gut'];
 const WEEKDAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
 const MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
@@ -622,6 +636,7 @@ function openMed(id) {
   sheet.innerHTML = `<div class="sheet-inner" data-medid="${m.id}">
     <div class="sheet-head"><h2>${id ? 'Medikament' : 'Neues Medikament'}</h2>
       <button class="btn ghost" data-act="${medReturnToAttack ? 'backtoattack' : 'close'}">Abbrechen</button></div>
+    ${id ? '' : suggestionsHTML()}
     <div class="field"><label for="m-name">Name und Dosis</label>
       <input type="text" id="m-name" value="${esc(m.name)}" placeholder="z. B. Sumatriptan 50 mg"></div>
     <div class="field"><span class="lbl">Art</span>
@@ -634,7 +649,19 @@ function openMed(id) {
   <div class="sheet-foot"><button class="btn primary" data-act="savemed">Speichern</button></div>`;
   sheet.hidden = false;
   document.body.style.overflow = 'hidden';
-  if (!id) setTimeout(() => $('#m-name').focus(), 50);
+}
+
+function suggestionsHTML() {
+  const have = new Set(state.meds.map(m => m.name.toLowerCase()));
+  const groups = Object.entries(MED_SUGGESTIONS).map(([type, names]) => {
+    const chips = names.filter(n => !have.has(n.toLowerCase()))
+      .map(n => `<button type="button" class="chip" data-sugg="${esc(n)}" data-type="${type}" aria-pressed="false">${esc(n)}</button>`).join('');
+    return chips ? `<div class="sugg-group"><span class="lbl">${SUGG_GROUPS[type]}</span><div class="chips">${chips}</div></div>` : '';
+  }).join('');
+  return `<div class="field"><label for="m-search">Häufige Migränemittel</label>
+    <input type="text" id="m-search" placeholder="Suchen, z. B. Suma …" autocomplete="off">
+    <div id="m-sugg" class="sugg">${groups}</div>
+    <p class="small muted">Antippen füllt Name und Art aus. Die Dosis bitte an die eigene Verordnung anpassen.</p></div>`;
 }
 
 function saveMed() {
@@ -827,6 +854,13 @@ document.addEventListener('click', e => {
       readAttackForm(); draft.meds.splice(+t.dataset.delmed, 1); renderAttackSheet(); return;
     }
   }
+  if (t.dataset.sugg) {
+    $$('#m-sugg .chip').forEach(c => c.setAttribute('aria-pressed', c === t));
+    $('#m-name').value = t.dataset.sugg;
+    $$('#m-type .chip').forEach(c => c.setAttribute('aria-pressed', c.dataset.type === t.dataset.type));
+    $('#m-since-f').hidden = t.dataset.type !== 'prophylaxe';
+    return;
+  }
   if (t.closest('#m-type') && t.dataset.type) {
     $$('#m-type .chip').forEach(c => c.setAttribute('aria-pressed', c === t));
     $('#m-since-f').hidden = t.dataset.type !== 'prophylaxe';
@@ -901,6 +935,16 @@ document.addEventListener('click', e => {
     }
     case 'ob-weather': t.setAttribute('aria-pressed', t.getAttribute('aria-pressed') !== 'true'); t.textContent = t.getAttribute('aria-pressed') === 'true' ? 'An' : 'Aus'; break;
   }
+});
+
+document.addEventListener('input', e => {
+  if (e.target.id !== 'm-search') return;
+  const q = e.target.value.trim().toLowerCase();
+  $$('#m-sugg .sugg-group').forEach(g => {
+    let any = false;
+    $$('.chip', g).forEach(c => { const hit = c.dataset.sugg.toLowerCase().includes(q); c.hidden = !hit; any = any || hit; });
+    g.hidden = !any;
+  });
 });
 
 document.addEventListener('change', e => {
