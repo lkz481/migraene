@@ -9,11 +9,12 @@ const PBKDF2_ITER = 310000;            // Schlüsselableitung für PIN und Backu
 const AUTOLOCK_MS = 5 * 60 * 1000;     // mit PIN: nach 5 Min. im Hintergrund wieder sperren
 
 const LOCATIONS = ['Links', 'Rechts', 'Beidseitig', 'Stirn', 'Schläfe', 'Hinter dem Auge', 'Hinterkopf', 'Nacken'];
-const SYMPTOMS = ['Aura', 'Übelkeit', 'Erbrechen', 'Lichtempfindlich', 'Lärmempfindlich', 'Geruchsempfindlich',
+const SYMPTOMS = ['Übelkeit', 'Erbrechen', 'Lichtempfindlich', 'Lärmempfindlich', 'Geruchsempfindlich',
   'Schwindel', 'Sehstörungen', 'Kribbeln/Taubheit', 'Pochend', 'Schlimmer bei Bewegung', 'Müdigkeit'];
 const TRIGGERS = ['Schlafmangel', 'Zu viel Schlaf', 'Stress', 'Entspannung nach Stress', 'Periode', 'Alkohol',
   'Koffein', 'Mahlzeit ausgelassen', 'Zu wenig getrunken', 'Wetterwechsel', 'Bildschirm', 'Grelles Licht',
   'Lärm', 'Gerüche', 'Sport', 'Bestimmtes Essen', 'Reisen', 'Verspannung'];
+const CORE_SYMPTOMS = ['Übelkeit', 'Erbrechen', 'Lichtempfindlich', 'Lärmempfindlich'];
 const IMPAIRMENT = ['Kaum', 'Etwas', 'Stark', 'Bettlägerig'];
 const MED_TYPES = {
   triptan: 'Triptan',
@@ -70,7 +71,8 @@ function painColor(n) {
   const hues = [150, 135, 110, 85, 60, 45, 30, 15, 5, 350];
   return `hsl(${hues[n - 1]} 55% 68%)`;
 }
-const hasAura = a => (a.symptoms || []).includes('Aura');
+const hasAura = a => a.aura === true;
+const auraText = a => (a.aura === true ? 'ja' : a.aura === false ? 'nein' : '–');
 const plural = (n, one, many) => (n === 1 ? one : many);
 
 /* ---------- Prüfen aller Daten (Speicher und Backup) ----------
@@ -159,11 +161,14 @@ function sanitizeState(raw) {
       if (weather.pressure === null) weather = null;
     }
     const imp = num(a.impairment, 0, 3);
+    const symptoms = strList(a.symptoms);
+    // früher war „Aura“ ein Symptom – jetzt ein eigenes Feld (ja / nein / unbekannt)
+    const aura = typeof a.aura === 'boolean' ? a.aura : (symptoms.includes('Aura') ? true : null);
     return {
-      id: freshId(a.id, attIds), start, end,
+      id: freshId(a.id, attIds), start, end, aura,
       intensity: Math.round(num(a.intensity, 0, 10) || 0),
       impairment: imp === null ? null : Math.round(imp),
-      locations: strList(a.locations), symptoms: strList(a.symptoms), triggers: strList(a.triggers),
+      locations: strList(a.locations), symptoms: symptoms.filter(x => x !== 'Aura'), triggers: strList(a.triggers),
       meds, notes: str(a.notes, 4000), weather
     };
   }).filter(Boolean);
@@ -621,9 +626,10 @@ function viewStats() {
   const durs = A.filter(a => a.end).map(a => (new Date(a.end) - new Date(a.start)) / 3600000);
   const avgDur = durs.length ? (durs.reduce((s, x) => s + x, 0) / durs.length).toFixed(1).replace('.', ',') : '–';
   const auraN = A.filter(hasAura).length;
+  const noAuraN = A.filter(a => a.aura === false).length;
 
   const triggers = countBy(A.flatMap(a => a.triggers || []));
-  const symptoms = countBy(A.flatMap(a => (a.symptoms || []).filter(s => s !== 'Aura')));
+  const symptoms = countBy(A.flatMap(a => a.symptoms || []));
   const weekdays = WEEKDAYS.map((w, i) => [w, A.filter(a => new Date(a.start).getDay() === i).length]);
   const wdOrdered = [...weekdays.slice(1), weekdays[0]];
   const wdMax = Math.max(1, ...wdOrdered.map(w => w[1]));
@@ -664,7 +670,7 @@ function viewStats() {
     <div class="card">
       <div class="grid2">
         <div class="stat"><b>${total}</b><span>Attacken gesamt</span></div>
-        <div class="stat"><b>${auraN} / ${total - auraN}</b><span>mit / ohne Aura</span></div>
+        <div class="stat"><b>${auraN} / ${noAuraN}</b><span>mit / ohne Aura</span></div>
         <div class="stat"><b>${avg}</b><span>Ø Stärke (1–10)</span></div>
         <div class="stat"><b>${avgDur}</b><span>Ø Dauer (Std)</span></div>
       </div>
@@ -757,7 +763,7 @@ function openAttack(id, focusMeds, day) {
     let start = new Date();
     if (day && day !== dayKey(start)) start = new Date(day + 'T12:00');
     draft = {
-      id: uid(), start: start.toISOString(), end: start.toISOString(), intensity: 0, impairment: null,
+      id: uid(), start: start.toISOString(), end: start.toISOString(), aura: null, intensity: 0, impairment: null,
       locations: [], symptoms: [], triggers: [], meds: [], notes: '', weather: null
     };
   }
@@ -785,7 +791,15 @@ function renderAttackSheet() {
       <button class="btn ghost" data-act="close">Abbrechen</button></div>
 
     <section class="form-sec">
-      <span class="lbl">Symptome</span>${chipsHTML('symptoms', SYMPTOMS, d.symptoms)}
+      <span class="lbl">Aura <span class="muted">(z. B. Flimmern, Sehstörungen, Kribbeln vor dem Schmerz)</span></span>
+      <div class="seg">
+        <button type="button" data-aura="1" aria-pressed="${d.aura === true}">Mit Aura</button>
+        <button type="button" data-aura="0" aria-pressed="${d.aura === false}">Ohne Aura</button>
+      </div>
+    </section>
+
+    <section class="form-sec">
+      <span class="lbl">Beschwerden</span>${chipsHTML('symptoms', SYMPTOMS, d.symptoms)}
     </section>
 
     <section class="form-sec">
@@ -848,14 +862,14 @@ function renderAttackSheet() {
 }
 
 // Auswahl beim Eintragen: eigene Mittel zuerst, dann alle gängigen Akutmittel
-function addMedSelectHTML(own) {
+function addMedSelectHTML(own, selId = 'f-addmed') {
   const have = new Set(state.meds.map(m => m.name.toLowerCase()));
   const groups = ['triptan', 'analgetikum', 'antiemetikum', 'sonstiges'].map(type => {
     const opts = MED_SUGGESTIONS[type].filter(n => !have.has(n.toLowerCase()))
       .map(n => `<option value="sugg:${type}:${esc(n)}">${esc(n)}</option>`).join('');
     return opts ? `<optgroup label="${SUGG_GROUPS[type]}">${opts}</optgroup>` : '';
   }).join('');
-  return `<select id="f-addmed" aria-label="Medikament hinzufügen"><option value="">+ Medikament hinzufügen …</option>
+  return `<select id="${selId}" aria-label="Medikament hinzufügen"><option value="">${selId === 'f-addmed' ? '+ Medikament hinzufügen …' : 'Anderes Mittel wählen …'}</option>
     ${own.length ? `<optgroup label="Meine Medikamente">${own.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</optgroup>` : ''}
     ${groups}
     <optgroup label="Nicht dabei?"><option value="__new">Anderes Medikament anlegen …</option></optgroup></select>`;
@@ -900,16 +914,194 @@ function closeSheet() {
   render();
 }
 
+/* ---------- Geführte Erfassung (eine Frage pro Bildschirm) ---------- */
+
+const FLOWS = {
+  start: ['aura', 'pain', 'meds', 'symptoms'],     // beim Start einer Attacke
+  end: ['impairment', 'where', 'triggers', 'notes'], // beim Beenden, wenn ergänzt werden soll
+  meds: ['meds']                                     // nur Medikament nachtragen
+};
+let flow = null;   // { id, kind, step, more }
+
+function flowAttack() { return flow && state.attacks.find(a => a.id === flow.id); }
+
+function openFlow(id, kind) {
+  flow = { id, kind, step: 0, more: false };
+  renderFlow();
+}
+
+function flowChips(group, options, a) {
+  const extra = (a[group] || []).filter(x => !options.includes(x));
+  return `<div class="chips flow-chips">${[...options, ...extra].map(o =>
+    `<button type="button" class="chip" data-fchip="${group}" data-val="${esc(o)}" aria-pressed="${(a[group] || []).includes(o)}">${esc(o)}</button>`).join('')}</div>`;
+}
+
+function flowStep(a, key) {
+  const own = state.meds.filter(m => m.type !== 'prophylaxe');
+  const taken = new Set(a.meds.map(m => m.medId));
+  switch (key) {
+    case 'aura': return {
+      q: 'Hast du eine Aura?', sub: 'Zum Beispiel Flimmern, Zickzack-Linien, Sehstörungen oder Kribbeln vor oder während des Schmerzes.',
+      body: `<div class="flow-choices">
+        <button class="choice" data-fset="aura" data-v="1" aria-pressed="${a.aura === true}">Ja, mit Aura</button>
+        <button class="choice" data-fset="aura" data-v="0" aria-pressed="${a.aura === false}">Nein, ohne Aura</button>
+        <button class="choice" data-fset="aura" data-v="" aria-pressed="false">Weiß ich noch nicht</button></div>`
+    };
+    case 'pain': return {
+      q: 'Wie stark ist der Schmerz?', sub: '1 = leicht, 10 = unerträglich',
+      body: `<div class="flow-pain">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n =>
+        `<button class="pain-btn" data-fset="intensity" data-v="${n}" aria-pressed="${a.intensity === n}" style="--pc:${painColor(n)}">${n}</button>`).join('')}</div>
+        <div class="flow-scale-legend"><span>leicht</span><span>mittel</span><span>stark</span></div>`
+    };
+    case 'meds': return {
+      q: 'Hast du schon etwas genommen?', sub: own.length ? 'Antippen zum Auswählen – mehrere sind möglich.' : 'Wähle dein Mittel aus der Liste.',
+      body: `${own.length ? `<div class="flow-choices">${own.map(m =>
+          `<button class="choice" data-fmed="${m.id}" aria-pressed="${taken.has(m.id)}">${esc(m.name)}</button>`).join('')}</div>` : ''}
+        ${addMedSelectHTML([], 'flow-addmed')}
+        ${a.meds.length ? `<p class="small muted">Gewählt: ${esc(a.meds.map(medName).join(', '))}</p>` : ''}`,
+      next: flow.kind === 'meds' ? 'Fertig' : a.meds.length ? 'Weiter' : 'Nein, noch nichts genommen'
+    };
+    case 'symptoms': {
+      const rest = SYMPTOMS.filter(x => !CORE_SYMPTOMS.includes(x));
+      const showMore = flow.more || a.symptoms.some(x => rest.includes(x));
+      return {
+        q: 'Welche Beschwerden hast du?', sub: 'Alles antippen, was passt.',
+        body: `${flowChips('symptoms', CORE_SYMPTOMS, { symptoms: a.symptoms.filter(x => CORE_SYMPTOMS.includes(x)) })}
+          ${showMore ? flowChips('symptoms', rest, { symptoms: a.symptoms.filter(x => !CORE_SYMPTOMS.includes(x)) })
+            : '<button class="btn ghost" data-fmore="1">Weitere Beschwerden anzeigen</button>'}`,
+        next: 'Fertig'
+      };
+    }
+    case 'impairment': return {
+      q: 'Wie sehr hat dich die Attacke eingeschränkt?', sub: 'Im Alltag, bei der Arbeit oder in der Freizeit.',
+      body: `<div class="flow-choices">${IMPAIRMENT.map((t, i) =>
+        `<button class="choice" data-fset="impairment" data-v="${i}" aria-pressed="${a.impairment === i}">${t}</button>`).join('')}</div>`
+    };
+    case 'where': return {
+      q: 'Wo saß der Schmerz?', sub: 'Mehrere Antworten möglich.',
+      body: flowChips('locations', LOCATIONS, a),
+      next: 'Weiter'
+    };
+    case 'triggers': return {
+      q: 'Gab es mögliche Auslöser?', sub: 'Mehrere Antworten möglich – oder einfach weiter.',
+      body: flowChips('triggers', TRIGGERS, a),
+      next: 'Weiter'
+    };
+    case 'notes': return {
+      q: 'Möchtest du noch etwas notieren?', sub: 'Zum Beispiel, was geholfen hat.',
+      body: `<textarea id="flow-notes" maxlength="4000" placeholder="Notiz (freiwillig)">${esc(a.notes)}</textarea>`,
+      next: 'Fertig'
+    };
+  }
+  return null;
+}
+
+function renderFlow() {
+  const a = flowAttack();
+  if (!a) { closeSheet(); return; }
+  const steps = FLOWS[flow.kind];
+  const sheet = $('#sheet');
+  if (flow.step >= steps.length) {
+    // Abschluss
+    const done = flow.kind === 'start';
+    sheet.innerHTML = `<div class="sheet-inner flow flow-done">
+      <svg class="done-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>
+      <h2>${done ? 'Gespeichert. Gute Besserung.' : 'Alles gespeichert.'}</h2>
+      <p class="muted">${done ? 'Ruh dich aus. Wenn die Attacke vorbei ist, tippe auf der Startseite auf „Attacke beenden“.' : 'Gute Erholung!'}</p>
+      <div class="flow-summary">
+        <span>Aura: <b>${auraText(a)}</b></span>
+        <span>Stärke: <b>${a.intensity || '–'}</b></span>
+        ${a.meds.length ? `<span>Medikamente: <b>${esc(a.meds.map(medName).join(', '))}</b></span>` : ''}
+        ${a.symptoms.length ? `<span>Beschwerden: <b>${esc(a.symptoms.join(', '))}</b></span>` : ''}
+        ${a.impairment !== null ? `<span>Einschränkung: <b>${IMPAIRMENT[a.impairment]}</b></span>` : ''}
+      </div>
+      <button class="btn primary block" data-flow="close">Schließen</button>
+      <button class="btn ghost" data-flow="full">Alles ansehen und bearbeiten</button>
+    </div>`;
+    sheet.hidden = false;
+    return;
+  }
+  const st = flowStep(a, steps[flow.step]);
+  const multi = steps.length > 1;
+  sheet.innerHTML = `<div class="sheet-inner flow">
+    <div class="flow-head">
+      ${flow.step > 0 ? '<button class="btn ghost" data-flow="back">‹ Zurück</button>' : '<span></span>'}
+      ${multi ? `<span class="flow-count">Schritt ${flow.step + 1} von ${steps.length}</span>` : '<span></span>'}
+      <button class="icon-btn" data-flow="close" aria-label="Schließen – Eingaben sind gespeichert">✕</button>
+    </div>
+    ${multi ? `<div class="flow-dots" aria-hidden="true">${steps.map((_, i) => `<i class="${i <= flow.step ? 'on' : ''}"></i>`).join('')}</div>` : ''}
+    <h2 class="flow-q">${st.q}</h2>
+    <p class="muted">${st.sub}</p>
+    ${st.body}
+  </div>
+  <div class="sheet-foot">
+    ${st.next ? `<button class="btn primary" data-flow="next">${st.next}</button>` : '<button class="btn" data-flow="next">Überspringen</button>'}
+  </div>`;
+  sheet.hidden = false;
+  sheet.scrollTop = 0;
+  document.body.style.overflow = 'hidden';
+}
+
+function flowNext() {
+  const a = flowAttack();
+  const note = $('#flow-notes');
+  if (a && note) { a.notes = note.value.trim().slice(0, 4000); save(); }
+  flow.step++;
+  flow.more = false;
+  if (flow.kind === 'meds' && flow.step >= FLOWS.meds.length) { const f = flow; flow = null; closeSheet(); if (f) toast('Gespeichert'); return; }
+  renderFlow();
+}
+
+function flowClick(t) {
+  const a = flowAttack();
+  if (!a) return false;
+  if (t.dataset.fset) {
+    const k = t.dataset.fset, v = t.dataset.v;
+    if (k === 'aura') a.aura = v === '' ? null : v === '1';
+    else a[k] = +v;
+    save();
+    $$(`[data-fset="${k}"]`).forEach(b => b.setAttribute('aria-pressed', b === t && v !== ''));
+    setTimeout(flowNext, 180);   // kurze Rückmeldung, dann automatisch weiter
+    return true;
+  }
+  if (t.dataset.fchip) {
+    const g = t.dataset.fchip, v = t.dataset.val;
+    const on = !a[g].includes(v);
+    a[g] = on ? [...a[g], v] : a[g].filter(x => x !== v);
+    t.setAttribute('aria-pressed', on);
+    save();
+    return true;
+  }
+  if (t.dataset.fmed) {
+    const i = a.meds.findIndex(m => m.medId === t.dataset.fmed);
+    if (i >= 0) a.meds.splice(i, 1); else a.meds.push({ medId: t.dataset.fmed, time: new Date().toISOString(), effect: null });
+    save(); renderFlow();
+    return true;
+  }
+  if (t.dataset.fmore) { flow.more = true; renderFlow(); return true; }
+  switch (t.dataset.flow) {
+    case 'next': flowNext(); return true;
+    case 'back': flow.step = Math.max(0, flow.step - 1); renderFlow(); return true;
+    case 'close': {
+      const note = $('#flow-notes');
+      if (note) { a.notes = note.value.trim().slice(0, 4000); save(); }
+      flow = null; closeSheet(); return true;
+    }
+    case 'full': flow = null; $('#sheet').hidden = true; openAttack(a.id); return true;
+  }
+  return false;
+}
+
 /* ---------- Formular: Medikament ---------- */
 
-let medReturnToAttack = false;
+let medReturn = null;   // 'attack' | 'flow' – wohin nach dem Anlegen eines Medikaments
 
 function openMed(id) {
   const m = state.meds.find(x => x.id === id) || { id: uid(), name: '', type: 'analgetikum', since: '' };
   const sheet = $('#sheet');
   sheet.innerHTML = `<div class="sheet-inner" data-medid="${m.id}">
     <div class="sheet-head"><h2>${id ? 'Medikament' : 'Medikament hinzufügen'}</h2>
-      <button class="btn ghost" data-act="${medReturnToAttack ? 'backtoattack' : 'close'}">Abbrechen</button></div>
+      <button class="btn ghost" data-act="${medReturn ? 'backtoattack' : 'close'}">Abbrechen</button></div>
     ${id ? '' : suggestionsHTML()}
     <div class="field"><label for="m-name">Name und Dosis</label>
       <input type="text" id="m-name" value="${esc(m.name)}" placeholder="z. B. Sumatriptan 50 mg" maxlength="120"></div>
@@ -949,10 +1141,17 @@ function saveMed() {
   if (existing) Object.assign(existing, { name, type, since });
   else state.meds.push({ id, name, type, since });
   save();
-  if (medReturnToAttack && draft) {
-    medReturnToAttack = false;
+  if (medReturn === 'attack' && draft) {
+    medReturn = null;
     if (type !== 'prophylaxe') draft.meds.push({ medId: id, time: new Date().toISOString(), effect: null });
     renderAttackSheet();
+    return;
+  }
+  if (medReturn === 'flow' && flow) {
+    medReturn = null;
+    const a = flowAttack();
+    if (a && type !== 'prophylaxe') { a.meds.push({ medId: id, time: new Date().toISOString(), effect: null }); save(); }
+    renderFlow();
     return;
   }
   closeSheet();
@@ -1134,7 +1333,7 @@ function buildReport() {
     <div class="kv">
       <div><b>${headacheDays(from, to)}</b>Kopfschmerztage</div>
       <div><b>${list.length}</b>Attacken</div>
-      <div><b>${list.filter(hasAura).length} / ${list.length - list.filter(hasAura).length}</b>mit / ohne Aura</div>
+      <div><b>${list.filter(hasAura).length} / ${list.filter(a => a.aura === false).length}</b>mit / ohne Aura</div>
       <div><b>${avg}</b>Ø Stärke (1–10)</div>
       <div><b>${avgDur} h</b>Ø Dauer</div>
       <div><b>${severe}</b>stark eingeschränkt / bettlägerig</div>
@@ -1155,9 +1354,9 @@ function buildReport() {
         <td>${fmtDateTime(a.start)}</td>
         <td>${a.end ? fmtDuration(a) : 'läuft'}</td>
         <td>${a.intensity || '–'}</td>
-        <td>${hasAura(a) ? 'ja' : 'nein'}</td>
+        <td>${auraText(a)}</td>
         <td>${a.impairment !== null && a.impairment !== undefined ? IMPAIRMENT[a.impairment] : '–'}</td>
-        <td>${esc([...(a.symptoms || []).filter(s => s !== 'Aura'), ...(a.locations || [])].join(', '))}</td>
+        <td>${esc([...(a.symptoms || []), ...(a.locations || [])].join(', '))}</td>
         <td>${(a.meds || []).map(m => `${esc(medName(m))} ${fmtTime(m.time)}${m.effect !== null && m.effect !== undefined ? ` (${EFFECTS[m.effect]})` : ''}`).join('<br>')}</td>
         <td>${esc((a.triggers || []).join(', '))}${a.notes ? `<br><i>${esc(a.notes)}</i>` : ''}${a.weather ? `<br>${a.weather.pressure} hPa${a.weather.change24 !== null ? ` (${a.weather.change24 > 0 ? '+' : ''}${a.weather.change24}/24h)` : ''}` : ''}</td>
       </tr>`).join('')}</tbody></table></div>` : '<p>Keine Attacken im Zeitraum.</p>'}
@@ -1187,6 +1386,9 @@ document.addEventListener('click', e => {
   const act = t.dataset.act;
   const id = t.dataset.id;
 
+  // Geführte Erfassung
+  if (flow && t.closest('#sheet') && !medReturn && flowClick(t)) return;
+
   // Formular-Interaktionen
   if (t.closest('#sheet') && draft) {
     if (t.dataset.pain) {
@@ -1194,6 +1396,12 @@ document.addEventListener('click', e => {
       const n = +t.dataset.pain;
       draft.intensity = draft.intensity === n ? 0 : n;
       renderAttackSheet(); return;
+    }
+    if (t.dataset.aura !== undefined) {
+      const v = t.dataset.aura === '1';
+      draft.aura = draft.aura === v ? null : v;
+      $$('[data-aura]').forEach(b => b.setAttribute('aria-pressed', (b.dataset.aura === '1') === draft.aura && draft.aura !== null));
+      return;
     }
     if (t.dataset.imp !== undefined) {
       const v = +t.dataset.imp;
@@ -1248,24 +1456,24 @@ document.addEventListener('click', e => {
 
   switch (act) {
     case 'start': {
-      const a = { id: uid(), start: new Date().toISOString(), end: null, intensity: 0, impairment: null, locations: [], symptoms: [], triggers: [], meds: [], notes: '', weather: null };
+      const a = { id: uid(), start: new Date().toISOString(), end: null, aura: null, intensity: 0, impairment: null, locations: [], symptoms: [], triggers: [], meds: [], notes: '', weather: null };
       state.attacks.push(a); save(); render();
-      toast('Attacke gestartet – gute Besserung');
       attachWeather(a, true);
+      openFlow(a.id, 'start');
       break;
     }
     case 'end': {
       const a = state.attacks.find(x => x.id === id);
       if (!a) break;
       a.end = new Date().toISOString(); save(); render();
-      dialog('Attacke beendet. Möchtest du noch etwas ergänzen?', { okText: 'Ja, ergänzen', cancelText: 'Nein, fertig' })
-        .then(more => { if (more) openAttack(a.id); else toast('Alles gespeichert – gute Erholung'); });
+      dialog('Attacke beendet. Möchtest du noch etwas ergänzen – Einschränkung, Schmerzort, Auslöser, Notiz?', { okText: 'Ja, ergänzen', cancelText: 'Nein, fertig' })
+        .then(more => { if (more) openFlow(a.id, 'end'); else toast('Alles gespeichert – gute Erholung'); });
       break;
     }
     case 'goto': tab = t.dataset.tab; render(); window.scrollTo(0, 0); break;
     case 'new': openAttack(null, false, t.dataset.day); break;
     case 'edit': openAttack(id); break;
-    case 'addmed': openAttack(id, true); break;
+    case 'addmed': openFlow(id, 'meds'); break;
     case 'close': closeSheet(); break;
     case 'saveattack': saveAttack(); break;
     case 'delete':
@@ -1284,7 +1492,7 @@ document.addEventListener('click', e => {
     case 'calnext': calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1); calDay = null; render(); break;
     case 'calday': calDay = calDay === t.dataset.day ? null : t.dataset.day; render(); break;
     case 'calall': calDay = null; render(); break;
-    case 'backtoattack': medReturnToAttack = false; renderAttackSheet(); break;
+    case 'backtoattack': { const r = medReturn; medReturn = null; if (r === 'flow') renderFlow(); else renderAttackSheet(); break; }
     case 'newmed': openMed(null); break;
     case 'editmed': openMed(id); break;
     case 'savemed': saveMed(); break;
@@ -1350,7 +1558,7 @@ document.addEventListener('change', e => {
     const v = e.target.value;
     if (!v) return;
     readAttackForm();
-    if (v === '__new') { medReturnToAttack = true; openMed(null); return; }
+    if (v === '__new') { medReturn = 'attack'; openMed(null); return; }
     let medId = v;
     if (v.startsWith('sugg:')) {
       // Vorschlag gewählt: automatisch unter „Meine Medikamente“ anlegen
@@ -1363,6 +1571,19 @@ document.addEventListener('change', e => {
     }
     draft.meds.push({ medId, time: new Date().toISOString(), effect: null });
     renderAttackSheet();
+  }
+  if (e.target.id === 'flow-addmed' && flow) {
+    const v = e.target.value;
+    const a = flowAttack();
+    if (!v || !a) return;
+    if (v === '__new') { medReturn = 'flow'; openMed(null); return; }
+    const [, type, ...rest] = v.split(':');
+    const name = rest.join(':');
+    if (!Object.hasOwn(MED_SUGGESTIONS, type) || !MED_SUGGESTIONS[type].includes(name)) return;
+    let med = state.meds.find(m => m.name.toLowerCase() === name.toLowerCase());
+    if (!med) { med = { id: uid(), name, type, since: '' }; state.meds.push(med); }
+    if (!a.meds.some(m => m.medId === med.id)) a.meds.push({ medId: med.id, time: new Date().toISOString(), effect: null });
+    save(); renderFlow();
   }
   if (e.target.id === 'set-name') { state.settings.name = e.target.value.trim().slice(0, 60); save(); }
   if (e.target.id === 'restore-file' && e.target.files[0]) { restore(e.target.files[0]); e.target.value = ''; }
