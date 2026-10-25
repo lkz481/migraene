@@ -43,10 +43,7 @@ function defaultState() {
   return {
     version: 1,
     settings: { name: '', weather: true, onboarded: false, lastBackup: null, coords: null },
-    meds: [
-      { id: uid(), name: 'Ibuprofen 400 mg', type: 'analgetikum' },
-      { id: uid(), name: 'Paracetamol 500 mg', type: 'analgetikum' }
-    ],
+    meds: [],
     attacks: []
   };
 }
@@ -567,10 +564,7 @@ function renderAttackSheet() {
           <span class="small muted">Wirkung</span>
           <div class="effect">${EFFECTS.map((e, j) => `<button type="button" data-medeff="${i}" data-v="${j}" aria-pressed="${m.effect === j}">${e}</button>`).join('')}</div>
         </div>`).join('')}</div>
-      ${medOpts.length ? `<select id="f-addmed"><option value="">+ Medikament hinzufügen …</option>
-        ${medOpts.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}
-        <option value="__new">Neues Medikament anlegen …</option></select>`
-        : `<button type="button" class="btn" data-act="newmed-inline">+ Medikament anlegen</button>`}
+      ${addMedSelectHTML(medOpts)}
     </div>
 
     <div class="field"><span class="lbl">Wo?</span>${chipsHTML('locations', LOCATIONS, d.locations)}</div>
@@ -594,6 +588,20 @@ function renderAttackSheet() {
   <div class="sheet-foot"><button class="btn primary" data-act="saveattack">Speichern</button></div>`;
   sheet.hidden = false;
   document.body.style.overflow = 'hidden';
+}
+
+// Auswahl beim Eintragen: eigene Mittel zuerst, dann alle gängigen Akutmittel
+function addMedSelectHTML(own) {
+  const have = new Set(state.meds.map(m => m.name.toLowerCase()));
+  const groups = ['triptan', 'analgetikum', 'antiemetikum', 'sonstiges'].map(type => {
+    const opts = MED_SUGGESTIONS[type].filter(n => !have.has(n.toLowerCase()))
+      .map(n => `<option value="sugg:${type}:${esc(n)}">${esc(n)}</option>`).join('');
+    return opts ? `<optgroup label="${SUGG_GROUPS[type]}">${opts}</optgroup>` : '';
+  }).join('');
+  return `<select id="f-addmed"><option value="">+ Medikament hinzufügen …</option>
+    ${own.length ? `<optgroup label="Meine Medikamente">${own.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</optgroup>` : ''}
+    ${groups}
+    <optgroup label="Nicht dabei?"><option value="__new">Anderes Medikament anlegen …</option></optgroup></select>`;
 }
 
 function readAttackForm() {
@@ -969,7 +977,16 @@ document.addEventListener('change', e => {
     if (!v) return;
     readAttackForm();
     if (v === '__new') { medReturnToAttack = true; openMed(null); return; }
-    draft.meds.push({ medId: v, time: new Date().toISOString(), effect: null });
+    let medId = v;
+    if (v.startsWith('sugg:')) {
+      // Vorschlag gewählt: automatisch unter „Meine Medikamente“ anlegen
+      const [, type, ...rest] = v.split(':');
+      const name = rest.join(':');
+      const known = state.meds.find(m => m.name.toLowerCase() === name.toLowerCase());
+      if (known) medId = known.id;
+      else { medId = uid(); state.meds.push({ id: medId, name, type, since: '' }); save(); }
+    }
+    draft.meds.push({ medId, time: new Date().toISOString(), effect: null });
     renderAttackSheet();
   }
   if (e.target.id === 'set-name') { state.settings.name = e.target.value.trim(); save(); }
