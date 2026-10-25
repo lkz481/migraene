@@ -167,7 +167,7 @@ function toast(msg) {
 
 /* ---------- Eigene Dialoge (statt confirm/prompt) ---------- */
 
-function dialog(msg, { okText = 'OK', danger = false, input = false } = {}) {
+function dialog(msg, { okText = 'OK', cancelText = 'Abbrechen', danger = false, input = false } = {}) {
   return new Promise(resolve => {
     const wrap = document.createElement('div');
     wrap.className = 'dlg-wrap';
@@ -175,7 +175,7 @@ function dialog(msg, { okText = 'OK', danger = false, input = false } = {}) {
       <p>${esc(msg)}</p>
       ${input ? '<input type="text" id="dlg-input" autocomplete="off">' : ''}
       <div class="grid2">
-        <button class="btn" data-dlg="0">Abbrechen</button>
+        <button class="btn" data-dlg="0">${esc(cancelText)}</button>
         <button class="btn ${danger ? 'danger-fill' : 'primary'}" data-dlg="1">${esc(okText)}</button>
       </div></div>`;
     document.body.appendChild(wrap);
@@ -886,7 +886,10 @@ document.addEventListener('click', e => {
     }
     case 'end': {
       const a = state.attacks.find(x => x.id === id);
-      if (a) { a.end = new Date().toISOString(); save(); openAttack(a.id); toast('Beendet – magst du noch etwas ergänzen?'); }
+      if (!a) break;
+      a.end = new Date().toISOString(); save(); render();
+      dialog('Attacke beendet. Möchtest du noch etwas ergänzen?', { okText: 'Ja, ergänzen', cancelText: 'Nein, fertig' })
+        .then(more => { if (more) openAttack(a.id); else toast('Alles gespeichert – gute Erholung'); });
       break;
     }
     case 'new': openAttack(null); break;
