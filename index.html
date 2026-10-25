@@ -3,13 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Sicherheit: nur eigener Code, keine fremden Skripte; einzige Verbindung nach außen ist der Wetterdienst -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.open-meteo.com https://archive-api.open-meteo.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <title>Migräne-Tagebuch</title>
-  <meta name="description" content="Persönliches Migräne-Tagebuch – Attacken, Medikamente, Auslöser.">
+  <meta name="description" content="Persönliches Migräne-Tagebuch – Attacken, Medikamente, Auslöser. Alle Daten bleiben auf dem Gerät.">
   <meta name="theme-color" content="#14161c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Migräne">
+  <meta name="format-detection" content="telephone=no">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="icon" type="image/png" href="icons/icon-192.png">
   <link rel="manifest" href="manifest.webmanifest">
@@ -23,10 +27,18 @@
   <main id="view" aria-live="polite"></main>
 
   <nav class="tabbar" aria-label="Navigation">
-    <button data-tab="home" class="active"><span class="ico">☾</span><span>Heute</span></button>
-    <button data-tab="diary"><span class="ico">▤</span><span>Tagebuch</span></button>
-    <button data-tab="stats"><span class="ico">◔</span><span>Muster</span></button>
-    <button data-tab="more"><span class="ico">⋯</span><span>Mehr</span></button>
+    <button data-tab="home" class="active">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 10.5 12 4l8.5 6.5V19a1 1 0 0 1-1 1H15v-5.5H9V20H4.5a1 1 0 0 1-1-1z"/></svg>
+      <span>Heute</span></button>
+    <button data-tab="diary">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+      <span>Tagebuch</span></button>
+    <button data-tab="stats">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20v-8M12 20V5M19 20v-5M3 20h18"/></svg>
+      <span>Auswertung</span></button>
+    <button data-tab="settings">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17" r="2"/></svg>
+      <span>Einstellungen</span></button>
   </nav>
 
   <div id="sheet" class="sheet" hidden></div>

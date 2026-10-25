@@ -51,3 +51,15 @@ Eine kostenlose Web-App fürs iPhone. Keine Werbung, kein Konto. Alle Daten blei
 
 Geänderte Dateien einfach erneut auf GitHub hochladen. Damit iPhones das Update sicher
 bekommen, in `sw.js` die Zeile `const VERSION = 'migraene-v1'` hochzählen (v2, v3 …).
+
+## Datenschutz & Sicherheit
+
+- Alle Einträge liegen **nur auf dem Handy** (Browser-Speicher). Kein Konto, kein Server, kein Tracking.
+- Eine Content Security Policy verhindert, dass fremder Code geladen wird.
+- Einzige Verbindung nach außen: der optionale Wetterabruf bei Open-Meteo (gerundeter Ort ca. 1 km und Datum,
+  ohne Namen, ohne Gesundheitsdaten, ohne Referrer).
+- **Optionaler PIN-Schutz** (Einstellungen): Daten werden mit AES-256-GCM verschlüsselt (Schlüssel per PBKDF2 aus der PIN).
+  Nach 5 Minuten im Hintergrund sperrt sich die App. PIN vergessen = Daten nur noch über ein Backup wiederherstellbar.
+- **Backups sind immer mit Passwort verschlüsselt.** Beim Wiederherstellen werden alle Inhalte geprüft und bereinigt.
+- Hinweis: Alle Seiten unter derselben github.io-Adresse teilen sich den Browser-Speicher. Daher keine fremden
+  Seiten im selben GitHub-Konto veröffentlichen – oder den PIN-Schutz nutzen.

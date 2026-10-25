@@ -237,3 +237,85 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .fold[open] { padding-bottom: 14px; display: grid; gap: 14px; }
 .fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
 @media (prefers-reduced-motion: reduce) { .fold > summary::after { transition: none; } }
+
+/* ---------- Überarbeitung: Navigation, Kalender, Sicherheit ---------- */
+.tabbar .ico { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tabbar button { font-size: 11px; }
+.tabbar button:focus-visible, .btn:focus-visible, .chip:focus-visible, .cal-day:focus-visible, .entry:focus-visible, .switch:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.h3 { font-size: 15px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
+
+.card-link { border: 0; color: inherit; text-align: left; width: 100%; font: inherit; }
+.card-link .grid2 { display: grid; }
+.card-link .stat { display: block; }
+
+.card.running { border: 1px solid var(--accent); }
+
+.entry-main { display: grid; gap: 2px; min-width: 0; }
+.entry .t { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.entry .tag { margin: 0; }
+.entry-plain { grid-template-columns: 1fr auto; }
+.list-head { margin: 4px 4px 0; }
+.empty-small { padding: 8px 4px; }
+
+/* Kalender */
+.cal { gap: 10px; }
+.cal-head { display: flex; align-items: center; justify-content: space-between; }
+.cal-head h2 { font-size: 19px; }
+.icon-btn {
+  width: 44px; height: 44px; border-radius: 12px; border: 0;
+  background: var(--surface-2); color: var(--text); font-size: 24px; line-height: 1;
+}
+.icon-btn:disabled { opacity: .3; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-wd span { text-align: center; font-size: 12px; color: var(--muted); }
+.cal-day {
+  position: relative; aspect-ratio: 1; max-width: 100%; border: 0; border-radius: 10px;
+  background: transparent; color: var(--text); font-size: 15px; display: grid; place-items: center;
+  font-variant-numeric: tabular-nums;
+}
+.cal-day.has { background: var(--pc); color: #15131f; font-weight: 600; }
+.cal-day.today { box-shadow: inset 0 0 0 2px var(--accent); }
+.cal-day.sel { outline: 2px solid var(--text); outline-offset: 1px; }
+.cal-day.future { color: var(--muted); opacity: .5; }
+.aura-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.cal-day .aura-dot { position: absolute; top: 4px; right: 4px; background: #15131f; }
+.cal-legend .aura-dot { vertical-align: middle; margin-right: 2px; }
+.cal-sum { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; color: var(--muted); }
+.cal-sum b { color: var(--text); font-size: 17px; }
+
+/* Formular */
+.form-sec { display: grid; gap: 10px; }
+.form-sec .lbl { font-size: 15px; color: var(--muted); }
+.time-grid { gap: 10px; }
+.time-grid .field { min-width: 0; }
+.time-grid input { font-size: 15px; padding: 12px 10px; }
+.running-note { min-height: 50px; display: flex; align-items: center; padding: 0 14px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); }
+.chip-add { border-style: dashed; color: var(--muted); }
+
+/* Einstellungen */
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.set-row > span { min-width: 0; }
+.switch {
+  flex: none; width: 52px; height: 32px; border-radius: 99px; border: 0; padding: 3px;
+  background: var(--surface-2); display: flex; transition: background .2s;
+}
+.switch span { width: 26px; height: 26px; border-radius: 50%; background: var(--muted); transition: transform .2s, background .2s; }
+.switch[aria-checked=true] { background: var(--accent); }
+.switch[aria-checked=true] span { transform: translateX(20px); background: #fff; }
+@media (prefers-reduced-motion: reduce) { .switch, .switch span { transition: none; } }
+.privacy { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--muted); }
+.privacy b { color: var(--text); }
+.ob-icon { border-radius: 16px; }
+
+/* Sperrbildschirm */
+.lock {
+  position: fixed; inset: 0; z-index: 60; background: var(--bg);
+  display: grid; place-items: center; padding: 24px;
+}
+.lock-inner { width: 100%; max-width: 340px; display: grid; gap: 14px; text-align: center; justify-items: center; }
+.lock-ico { width: 48px; height: 48px; fill: none; stroke: var(--accent); stroke-width: 1.6; }
+.lock input { text-align: center; font-size: 26px; letter-spacing: .4em; }
+.lock-msg { min-height: 1.4em; color: var(--danger); font-size: 15px; }
+.dlg input { font-size: 18px; }
