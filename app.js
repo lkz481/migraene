@@ -1,0 +1,948 @@
+'use strict';
+
+/* =========================================================
+   Migräne-Tagebuch – alle Daten bleiben lokal auf dem Gerät
+   ========================================================= */
+
+const STORE_KEY = 'migraene-tagebuch-v1';
+
+const LOCATIONS = ['Links', 'Rechts', 'Beidseitig', 'Stirn', 'Schläfe', 'Hinter dem Auge', 'Hinterkopf', 'Nacken'];
+const SYMPTOMS = ['Aura', 'Übelkeit', 'Erbrechen', 'Lichtempfindlich', 'Lärmempfindlich', 'Geruchsempfindlich',
+  'Schwindel', 'Sehstörungen', 'Kribbeln/Taubheit', 'Pochend', 'Schlimmer bei Bewegung', 'Müdigkeit'];
+const TRIGGERS = ['Schlafmangel', 'Zu viel Schlaf', 'Stress', 'Entspannung nach Stress', 'Periode', 'Alkohol',
+  'Koffein', 'Mahlzeit ausgelassen', 'Zu wenig getrunken', 'Wetterwechsel', 'Bildschirm', 'Grelles Licht',
+  'Lärm', 'Gerüche', 'Sport', 'Bestimmtes Essen', 'Reisen', 'Verspannung'];
+const MED_TYPES = {
+  triptan: 'Triptan',
+  analgetikum: 'Schmerzmittel',
+  antiemetikum: 'Gegen Übelkeit',
+  prophylaxe: 'Prophylaxe (täglich)',
+  sonstiges: 'Sonstiges'
+};
+const EFFECTS = ['Keine', 'Etwas', 'Gut', 'Sehr gut'];
+const WEEKDAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+
+/* ---------- Speicher ---------- */
+
+function defaultState() {
+  return {
+    version: 1,
+    settings: { name: '', weather: true, onboarded: false, lastBackup: null, coords: null },
+    meds: [
+      { id: uid(), name: 'Ibuprofen 400 mg', type: 'analgetikum' },
+      { id: uid(), name: 'Paracetamol 500 mg', type: 'analgetikum' }
+    ],
+    attacks: []
+  };
+}
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) return Object.assign(defaultState(), JSON.parse(raw));
+  } catch (e) { console.warn(e); }
+  return defaultState();
+}
+
+let state = load();
+
+function save() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(state));
+  } catch (e) {
+    toast('Speichern fehlgeschlagen – bitte Backup erstellen!');
+  }
+}
+
+try { navigator.storage?.persist?.().catch(() => {}); } catch (e) {}
+
+/* ---------- Helfer ---------- */
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+const pad = n => String(n).padStart(2, '0');
+function toLocalInput(d) {
+  d = new Date(d);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function dayKey(d) { d = new Date(d); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function fmtDate(d) { return new Date(d).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }); }
+function fmtTime(d) { return new Date(d).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); }
+function fmtDateTime(d) { return `${fmtDate(d)}, ${fmtTime(d)}`; }
+function fmtDuration(a) {
+  const end = a.end ? new Date(a.end) : new Date();
+  let min = Math.max(0, Math.round((end - new Date(a.start)) / 60000));
+  const h = Math.floor(min / 60); min %= 60;
+  if (h >= 24) return `${Math.floor(h / 24)} T ${h % 24} Std`;
+  return h ? `${h} Std ${min} Min` : `${min} Min`;
+}
+function painColor(n) {
+  if (!n) return '#3a3f4e';
+  const hues = [150, 135, 110, 85, 60, 45, 30, 15, 5, 350];
+  return `hsl(${hues[n - 1]} 55% 68%)`;
+}
+
+// Alle Kalendertage, die eine Attacke berührt
+function attackDays(a) {
+  const days = [];
+  const d = new Date(a.start); d.setHours(0, 0, 0, 0);
+  const end = new Date(a.end || a.start);
+  let guard = 0;
+  while (d <= end && guard++ < 40) { days.push(dayKey(d)); d.setDate(d.getDate() + 1); }
+  return days.length ? days : [dayKey(a.start)];
+}
+
+function attacksBetween(from, to) {
+  return state.attacks.filter(a => new Date(a.start) <= to && new Date(a.end || a.start) >= from);
+}
+
+function headacheDays(from, to) {
+  const set = new Set();
+  const fk = dayKey(from), tk = dayKey(to);
+  attacksBetween(from, to).forEach(a => attackDays(a).forEach(k => { if (k >= fk && k <= tk) set.add(k); }));
+  return set.size;
+}
+
+// Tage mit Einnahme je Medikamententyp
+function medDays(from, to) {
+  const res = { triptan: new Set(), analgetikum: new Set(), acute: new Set() };
+  state.attacks.forEach(a => (a.meds || []).forEach(m => {
+    const t = new Date(m.time || a.start);
+    if (t < from || t > to) return;
+    const med = state.meds.find(x => x.id === m.medId);
+    const type = med ? med.type : m.type;
+    const k = dayKey(t);
+    if (type === 'triptan') res.triptan.add(k);
+    if (type === 'analgetikum') res.analgetikum.add(k);
+    if (type === 'triptan' || type === 'analgetikum') res.acute.add(k);
+  }));
+  return { triptan: res.triptan.size, analgetikum: res.analgetikum.size, acute: res.acute.size };
+}
+
+function last30() {
+  const to = new Date();
+  const from = new Date(); from.setDate(from.getDate() - 29); from.setHours(0, 0, 0, 0);
+  return { from, to };
+}
+
+function overuseWarnings() {
+  const { from, to } = last30();
+  const d = medDays(from, to);
+  const w = [];
+  if (d.triptan >= 10) w.push(`An <strong>${d.triptan} Tagen</strong> in den letzten 30 Tagen wurde ein Triptan genommen (Grenze: unter 10 Tage/Monat).`);
+  if (d.analgetikum >= 15) w.push(`An <strong>${d.analgetikum} Tagen</strong> in den letzten 30 Tagen wurden Schmerzmittel genommen (Grenze: unter 15 Tage/Monat).`);
+  else if (d.acute >= 10 && d.triptan < 10) w.push(`An <strong>${d.acute} Tagen</strong> in den letzten 30 Tagen wurden Akutmedikamente genommen. Ab ca. 10 Tagen/Monat steigt das Risiko für Kopfschmerz durch Medikamentenübergebrauch.`);
+  return w;
+}
+
+function activeAttack() { return state.attacks.find(a => !a.end); }
+
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2800);
+}
+
+/* ---------- Eigene Dialoge (statt confirm/prompt) ---------- */
+
+function dialog(msg, { okText = 'OK', danger = false, input = false } = {}) {
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.className = 'dlg-wrap';
+    wrap.innerHTML = `<div class="dlg" role="dialog" aria-modal="true">
+      <p>${esc(msg)}</p>
+      ${input ? '<input type="text" id="dlg-input" autocomplete="off">' : ''}
+      <div class="grid2">
+        <button class="btn" data-dlg="0">Abbrechen</button>
+        <button class="btn ${danger ? 'danger-fill' : 'primary'}" data-dlg="1">${esc(okText)}</button>
+      </div></div>`;
+    document.body.appendChild(wrap);
+    const inp = $('#dlg-input', wrap);
+    if (inp) setTimeout(() => inp.focus(), 50);
+    const done = ok => { wrap.remove(); resolve(input ? (ok ? inp.value.trim() : '') : ok); };
+    wrap.addEventListener('click', e => {
+      const b = e.target.closest('[data-dlg]');
+      if (b) { e.stopPropagation(); done(b.dataset.dlg === '1'); }
+    });
+    if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') done(true); });
+  });
+}
+
+/* ---------- Wetter (Open-Meteo, kostenlos, ohne Konto) ---------- */
+
+function getCoords() {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) return resolve(state.settings.coords);
+    navigator.geolocation.getCurrentPosition(
+      p => {
+        const c = { lat: +p.coords.latitude.toFixed(2), lon: +p.coords.longitude.toFixed(2) };
+        state.settings.coords = c; save();
+        resolve(c);
+      },
+      () => resolve(state.settings.coords),
+      { timeout: 10000, maximumAge: 30 * 60000 }
+    );
+  });
+}
+
+async function fetchWeather(when) {
+  const c = await getCoords();
+  if (!c) throw new Error('Kein Standort');
+  const t = new Date(when);
+  const prev = new Date(t); prev.setDate(prev.getDate() - 1);
+  const ageDays = (Date.now() - t) / 86400000;
+  const host = ageDays > 80 ? 'https://archive-api.open-meteo.com/v1/archive' : 'https://api.open-meteo.com/v1/forecast';
+  const url = `${host}?latitude=${c.lat}&longitude=${c.lon}&hourly=surface_pressure,temperature_2m,relative_humidity_2m`
+    + `&start_date=${dayKey(prev)}&end_date=${dayKey(t)}&timezone=auto`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Wetterdienst nicht erreichbar');
+  const data = await res.json();
+  const target = `${dayKey(t)}T${pad(t.getHours())}:00`;
+  const i = data.hourly.time.indexOf(target);
+  if (i < 0 || data.hourly.surface_pressure[i] == null) throw new Error('Keine Daten');
+  const p = data.hourly.surface_pressure[i];
+  const p24 = i >= 24 ? data.hourly.surface_pressure[i - 24] : null;
+  return {
+    for: target,
+    pressure: Math.round(p),
+    change24: p24 != null ? Math.round((p - p24) * 10) / 10 : null,
+    temp: Math.round(data.hourly.temperature_2m[i]),
+    humidity: Math.round(data.hourly.relative_humidity_2m[i])
+  };
+}
+
+async function attachWeather(attack, silent) {
+  if (!state.settings.weather) return;
+  try {
+    const w = await fetchWeather(attack.start);
+    const a = state.attacks.find(x => x.id === attack.id);
+    if (!a) return;
+    a.weather = w; save();
+    if (!silent) toast('Wetterdaten gespeichert');
+    if ($('#sheet').hidden) render();
+  } catch (e) {
+    if (!silent) toast('Wetter konnte nicht geladen werden');
+  }
+}
+
+function weatherHTML(w) {
+  if (!w) return '<span class="muted">Keine Wetterdaten</span>';
+  const ch = w.change24;
+  const trend = ch == null ? '' : ch <= -3 ? ' · stark fallend' : ch >= 3 ? ' · stark steigend' : ' · stabil';
+  return `<div class="weather">
+    <span>Luftdruck <b>${w.pressure} hPa</b></span>
+    ${ch != null ? `<span>24 h: <b>${ch > 0 ? '+' : ''}${ch} hPa</b>${trend}</span>` : ''}
+    <span><b>${w.temp} °C</b></span>
+    <span>Feuchte <b>${w.humidity} %</b></span>
+  </div>`;
+}
+
+/* ---------- Navigation ---------- */
+
+let tab = 'home';
+const TITLES = { home: 'Heute', diary: 'Tagebuch', stats: 'Muster', more: 'Mehr' };
+
+$$('.tabbar button').forEach(b => b.addEventListener('click', () => {
+  tab = b.dataset.tab;
+  $$('.tabbar button').forEach(x => x.classList.toggle('active', x === b));
+  render();
+  window.scrollTo(0, 0);
+}));
+
+function render() {
+  $('#title').textContent = TITLES[tab];
+  const v = $('#view');
+  v.innerHTML = { home: viewHome, diary: viewDiary, stats: viewStats, more: viewMore }[tab]();
+}
+
+/* ---------- Ansicht: Heute ---------- */
+
+function greeting() {
+  const h = new Date().getHours();
+  const g = h < 5 ? 'Gute Nacht' : h < 11 ? 'Guten Morgen' : h < 17 ? 'Hallo' : h < 22 ? 'Guten Abend' : 'Gute Nacht';
+  const n = state.settings.name.trim();
+  return n ? `${g}, ${esc(n)}` : g;
+}
+
+function viewHome() {
+  const act = activeAttack();
+  const { from, to } = last30();
+  const days = headacheDays(from, to);
+  const md = medDays(from, to);
+  const warns = overuseWarnings();
+  const last = [...state.attacks].filter(a => a.end).sort((a, b) => new Date(b.start) - new Date(a.start))[0];
+  let sinceText = '';
+  if (!act && last) {
+    const d = Math.floor((Date.now() - new Date(last.end)) / 86400000);
+    sinceText = d === 0 ? 'Letzte Attacke: heute' : d === 1 ? 'Seit 1 Tag ohne Attacke' : `Seit ${d} Tagen ohne Attacke`;
+  }
+  const backupDue = state.attacks.length >= 3 &&
+    (!state.settings.lastBackup || Date.now() - new Date(state.settings.lastBackup) > 30 * 86400000);
+
+  return `
+    <div class="greet">
+      <p>${greeting()}</p>
+      <p class="muted">${act ? 'Gute Besserung. Ruh dich aus – du kannst alles später ergänzen.' : sinceText || 'Schön, dass du da bist.'}</p>
+    </div>
+
+    ${act ? `
+      <div class="card">
+        <div class="row"><h2>Attacke läuft</h2><span class="muted">${fmtDuration(act)}</span></div>
+        <p class="muted small">Seit ${fmtDateTime(act.start)}${act.intensity ? ` · Stärke ${act.intensity}/10` : ''}</p>
+        <div class="grid2">
+          <button class="btn" data-act="edit" data-id="${act.id}">Ergänzen</button>
+          <button class="btn" data-act="addmed" data-id="${act.id}">Medikament</button>
+        </div>
+        <button class="big-btn active" data-act="end" data-id="${act.id}">Attacke beenden</button>
+      </div>` : `
+      <button class="big-btn" data-act="start">Attacke beginnt jetzt</button>
+      <button class="btn block" data-act="new">Vergangene Attacke nachtragen</button>`}
+
+    ${warns.map(w => `<div class="card warn"><p>⚠︎ ${w}</p><p class="small muted">Bitte mit der Ärztin oder dem Arzt besprechen.</p></div>`).join('')}
+
+    <div class="card">
+      <h3>Letzte 30 Tage</h3>
+      <div class="grid2">
+        <div class="stat"><b>${days}</b><span>Kopfschmerztage</span></div>
+        <div class="stat"><b>${md.acute}</b><span>Tage mit Akutmedikament</span></div>
+      </div>
+    </div>
+
+    ${backupDue ? `<div class="card"><p>Zeit für ein Backup? Deine Einträge liegen nur auf diesem Handy.</p>
+      <button class="btn" data-act="backup">Jetzt sichern</button></div>` : ''}
+  `;
+}
+
+/* ---------- Ansicht: Tagebuch ---------- */
+
+function viewDiary() {
+  if (!state.attacks.length) {
+    return `<div class="empty"><span class="ico">☾</span>Noch keine Einträge.<br>Hoffentlich bleibt das lange so.</div>
+      <button class="btn primary block" data-act="new">Attacke eintragen</button>`;
+  }
+  const sorted = [...state.attacks].sort((a, b) => new Date(b.start) - new Date(a.start));
+  let html = '<button class="btn primary block" data-act="new">+ Attacke eintragen</button>';
+  let month = '';
+  sorted.forEach(a => {
+    const d = new Date(a.start);
+    const m = `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+    if (m !== month) {
+      month = m;
+      const from = new Date(d.getFullYear(), d.getMonth(), 1);
+      const to = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59);
+      html += `<h3 class="month-h">${m} · ${headacheDays(from, to)} Tage</h3>`;
+    }
+    const meds = (a.meds || []).map(x => medName(x)).join(', ');
+    html += `<button class="entry" data-act="edit" data-id="${a.id}">
+      <span class="pain" style="background:${painColor(a.intensity)}">${a.intensity || '–'}</span>
+      <span><span class="t">${fmtDate(a.start)}</span><br>
+        <span class="s">${fmtTime(a.start)} · ${a.end ? fmtDuration(a) : 'läuft noch'}${(a.symptoms || []).includes('Aura') ? ' · Aura' : ''}</span>
+        ${meds ? `<br><span class="s">💊 ${esc(meds)}</span>` : ''}
+      </span>
+      <span class="muted">›</span>
+    </button>`;
+  });
+  return `<div class="list">${html}</div>`;
+}
+
+function medName(m) {
+  const med = state.meds.find(x => x.id === m.medId);
+  return med ? med.name : (m.name || 'Medikament');
+}
+
+/* ---------- Ansicht: Muster ---------- */
+
+function countBy(list) {
+  const c = {};
+  list.forEach(x => { c[x] = (c[x] || 0) + 1; });
+  return Object.entries(c).sort((a, b) => b[1] - a[1]);
+}
+
+function barsHTML(entries, total, max = 8) {
+  if (!entries.length) return '<p class="muted small">Noch keine Daten.</p>';
+  const top = entries.slice(0, max);
+  const m = Math.max(...top.map(e => e[1]));
+  return `<div class="bars">${top.map(([k, n]) => `
+    <div class="bar"><span>${esc(k)}</span>
+      <span class="track"><span class="fill" style="width:${(n / m) * 100}%"></span></span>
+      <span class="n">${total ? Math.round((n / total) * 100) + '%' : n}</span></div>`).join('')}</div>`;
+}
+
+function viewStats() {
+  const A = state.attacks.filter(a => a.end || a.intensity);
+  if (A.length < 2) {
+    return `<div class="empty"><span class="ico">◔</span>Ab ein paar Einträgen zeigt dir die App hier,<br>welche Muster es gibt.</div>`;
+  }
+  // Kopfschmerztage pro Monat (letzte 6 Monate)
+  const now = new Date();
+  const months = [];
+  for (let i = 5; i >= 0; i--) {
+    const from = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const to = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59);
+    months.push({ label: MONTHS[from.getMonth()].slice(0, 3), n: headacheDays(from, to) });
+  }
+  const mMax = Math.max(1, ...months.map(m => m.n));
+
+  const total = A.length;
+  const avg = (A.reduce((s, a) => s + (a.intensity || 0), 0) / (A.filter(a => a.intensity).length || 1)).toFixed(1).replace('.', ',');
+  const durs = A.filter(a => a.end).map(a => (new Date(a.end) - new Date(a.start)) / 3600000);
+  const avgDur = durs.length ? (durs.reduce((s, x) => s + x, 0) / durs.length).toFixed(1).replace('.', ',') : '–';
+
+  const triggers = countBy(A.flatMap(a => a.triggers || []));
+  const symptoms = countBy(A.flatMap(a => a.symptoms || []));
+  const weekdays = WEEKDAYS.map((w, i) => [w, A.filter(a => new Date(a.start).getDay() === i).length]);
+  const wdOrdered = [...weekdays.slice(1), weekdays[0]];
+  const wdMax = Math.max(1, ...wdOrdered.map(w => w[1]));
+
+  const tod = [['Nacht (0–6)', 0], ['Morgen (6–12)', 0], ['Nachmittag (12–18)', 0], ['Abend (18–24)', 0]];
+  A.forEach(a => { tod[Math.floor(new Date(a.start).getHours() / 6)][1]++; });
+
+  // Wetter
+  const W = A.filter(a => a.weather && a.weather.change24 != null);
+  let weatherCard = '';
+  if (W.length) {
+    const falling = W.filter(a => a.weather.change24 <= -3).length;
+    const rising = W.filter(a => a.weather.change24 >= 3).length;
+    weatherCard = `<div class="card"><h3>Luftdruck bei Beginn</h3>
+      ${barsHTML([['Stark fallend', falling], ['Stabil', W.length - falling - rising], ['Stark steigend', rising]], W.length)}
+      <p class="small muted">„Stark“ = mehr als 3 hPa Änderung in 24 Std. Basis: ${W.length} Attacken mit Wetterdaten.</p></div>`;
+  }
+
+  // Wirkung der Medikamente
+  const eff = {};
+  A.forEach(a => (a.meds || []).forEach(m => {
+    if (m.effect == null) return;
+    const n = medName(m);
+    (eff[n] = eff[n] || []).push(m.effect);
+  }));
+  const effRows = Object.entries(eff).map(([n, v]) => {
+    const av = v.reduce((s, x) => s + x, 0) / v.length;
+    return `<div class="bar"><span>${esc(n)}</span>
+      <span class="track"><span class="fill" style="width:${(av / 3) * 100}%;background:var(--ok)"></span></span>
+      <span class="n">${v.length}×</span></div>`;
+  }).join('');
+
+  return `
+    <div class="card">
+      <h3>Kopfschmerztage pro Monat</h3>
+      <div class="cols">${months.map(m => `<div class="col"><span class="v">${m.n}</span>
+        <span class="b" style="height:${(m.n / mMax) * 100}px"></span><span>${m.label}</span></div>`).join('')}</div>
+    </div>
+    <div class="card">
+      <div class="grid2">
+        <div class="stat"><b>${total}</b><span>Attacken gesamt</span></div>
+        <div class="stat"><b>${avg}</b><span>Ø Stärke (0–10)</span></div>
+        <div class="stat"><b>${avgDur}</b><span>Ø Dauer (Std)</span></div>
+        <div class="stat"><b>${Math.round(A.filter(a => (a.symptoms || []).includes('Aura')).length / total * 100)}%</b><span>mit Aura</span></div>
+      </div>
+    </div>
+    <div class="card"><h3>Häufigste Auslöser</h3>${barsHTML(triggers, total)}
+      <p class="small muted">Anteil der Attacken, bei denen der Auslöser notiert wurde.</p></div>
+    ${weatherCard}
+    <div class="card"><h3>Wochentage</h3>
+      <div class="cols">${wdOrdered.map(([w, n]) => `<div class="col"><span class="v">${n}</span>
+        <span class="b" style="height:${(n / wdMax) * 100}px"></span><span>${w}</span></div>`).join('')}</div></div>
+    <div class="card"><h3>Tageszeit des Beginns</h3>${barsHTML(tod.filter(t => t[1]), total)}</div>
+    <div class="card"><h3>Begleitsymptome</h3>${barsHTML(symptoms, total)}</div>
+    ${effRows ? `<div class="card"><h3>Wirkung der Medikamente</h3><div class="bars">${effRows}</div>
+      <p class="small muted">Balken = durchschnittliche Wirkung (voll = sehr gut).</p></div>` : ''}
+  `;
+}
+
+/* ---------- Ansicht: Mehr ---------- */
+
+function viewMore() {
+  const meds = state.meds.map(m => `
+    <button class="entry" style="grid-template-columns:1fr auto" data-act="editmed" data-id="${m.id}">
+      <span><span class="t">${esc(m.name)}</span><br><span class="s">${MED_TYPES[m.type] || ''}${m.since ? ' · seit ' + new Date(m.since).toLocaleDateString('de-DE') : ''}</span></span>
+      <span class="muted">›</span></button>`).join('');
+  const lb = state.settings.lastBackup ? new Date(state.settings.lastBackup).toLocaleDateString('de-DE') : 'noch nie';
+  return `
+    <div class="card">
+      <h3>Für den Arzttermin</h3>
+      <p class="small muted">Kopfschmerzkalender mit Übersicht – als PDF speichern, drucken oder teilen.</p>
+      <button class="btn primary" data-act="report">Arztbericht erstellen</button>
+    </div>
+    <div class="card">
+      <div class="row"><h3>Meine Medikamente</h3><button class="btn ghost" data-act="newmed">+ Neu</button></div>
+      <div class="list">${meds || '<p class="muted small">Noch keine Medikamente angelegt.</p>'}</div>
+    </div>
+    <div class="card">
+      <h3>Einstellungen</h3>
+      <div class="field"><label for="set-name">Dein Name</label>
+        <input type="text" id="set-name" value="${esc(state.settings.name)}" placeholder="Vorname" autocomplete="given-name"></div>
+      <div class="row"><span>Luftdruck automatisch speichern</span>
+        <button class="chip" data-act="toggleweather" aria-pressed="${state.settings.weather}">${state.settings.weather ? 'An' : 'Aus'}</button></div>
+      <p class="small muted">Dafür wird beim Eintragen kurz der ungefähre Standort genutzt und an den kostenlosen Wetterdienst Open-Meteo geschickt. Sonst verlässt nichts dein Handy.</p>
+    </div>
+    <div class="card">
+      <h3>Backup</h3>
+      <p class="small muted">Alle Daten liegen nur auf diesem Handy. Sichere sie regelmäßig, z. B. in „Dateien“ → iCloud Drive. Letztes Backup: ${lb}.</p>
+      <div class="grid2">
+        <button class="btn" data-act="backup">Sichern</button>
+        <button class="btn" data-act="restore">Wiederherstellen</button>
+      </div>
+      <input type="file" id="restore-file" accept=".json,application/json" hidden>
+    </div>
+    <div class="card">
+      <p class="small muted">Diese App ersetzt keine ärztliche Beratung. Die Warnungen zum Medikamentengebrauch orientieren sich an den Kriterien der Internationalen Kopfschmerzgesellschaft (Triptane ≥ 10, einfache Schmerzmittel ≥ 15 Tage/Monat).</p>
+      <button class="btn danger" data-act="wipe">Alle Daten löschen</button>
+    </div>
+  `;
+}
+
+/* ---------- Formular: Attacke ---------- */
+
+let draft = null;
+
+function openAttack(id, focusMeds) {
+  const existing = state.attacks.find(a => a.id === id);
+  draft = existing ? JSON.parse(JSON.stringify(existing)) : {
+    id: uid(), start: new Date().toISOString(), end: null, intensity: 0,
+    locations: [], symptoms: [], triggers: [], meds: [], notes: ''
+  };
+  draft._new = !existing;
+  if (!existing) draft.end = new Date().toISOString();
+  renderAttackSheet();
+  if (focusMeds) setTimeout(() => $('#meds-anchor')?.scrollIntoView({ behavior: 'smooth' }), 50);
+}
+
+function chipsHTML(group, options, selected) {
+  const extra = selected.filter(s => !options.includes(s));
+  return `<div class="chips" data-group="${group}">${[...options, ...extra].map(o =>
+    `<button type="button" class="chip" aria-pressed="${selected.includes(o)}" data-val="${esc(o)}">${esc(o)}</button>`).join('')}
+    <button type="button" class="chip" data-addchip="${group}">+ Eigenes</button></div>`;
+}
+
+function renderAttackSheet() {
+  const d = draft;
+  const running = !d.end;
+  const medOpts = state.meds.filter(m => m.type !== 'prophylaxe');
+  const sheet = $('#sheet');
+  sheet.innerHTML = `<div class="sheet-inner">
+    <div class="sheet-head"><h2>${d._new ? 'Neue Attacke' : 'Attacke'}</h2>
+      <button class="btn ghost" data-act="close">Abbrechen</button></div>
+
+    <div class="field"><label for="f-start">Beginn</label>
+      <input type="datetime-local" id="f-start" value="${toLocalInput(d.start)}"></div>
+
+    <div class="field"><span class="lbl">Ende</span>
+      <div class="chips"><button type="button" class="chip" id="f-running" aria-pressed="${running}">Läuft noch</button></div>
+      <input type="datetime-local" id="f-end" value="${d.end ? toLocalInput(d.end) : ''}" ${running ? 'hidden' : ''}></div>
+
+    <div class="field"><span class="lbl">Stärke (1 = leicht, 10 = unerträglich)</span>
+      <div class="scale">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n =>
+        `<button type="button" data-pain="${n}" aria-pressed="${d.intensity === n}" style="${d.intensity === n ? `background:${painColor(n)}` : ''}">${n}</button>`).join('')}</div></div>
+
+    <div class="field"><span class="lbl">Wo?</span>${chipsHTML('locations', LOCATIONS, d.locations)}</div>
+    <div class="field"><span class="lbl">Symptome</span>${chipsHTML('symptoms', SYMPTOMS, d.symptoms)}</div>
+    <div class="field"><span class="lbl">Mögliche Auslöser</span>${chipsHTML('triggers', TRIGGERS, d.triggers)}</div>
+
+    <div class="field" id="meds-anchor"><span class="lbl">Medikamente</span>
+      <div class="list">${d.meds.map((m, i) => `
+        <div class="med-row">
+          <div class="row"><b>${esc(medName(m))}</b><button type="button" class="btn ghost" data-delmed="${i}">Entfernen</button></div>
+          <input type="datetime-local" data-medtime="${i}" value="${toLocalInput(m.time)}">
+          <span class="small muted">Wirkung</span>
+          <div class="effect">${EFFECTS.map((e, j) => `<button type="button" data-medeff="${i}" data-v="${j}" aria-pressed="${m.effect === j}">${e}</button>`).join('')}</div>
+        </div>`).join('')}</div>
+      ${medOpts.length ? `<select id="f-addmed"><option value="">+ Medikament hinzufügen …</option>
+        ${medOpts.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}
+        <option value="__new">Neues Medikament anlegen …</option></select>`
+        : `<button type="button" class="btn" data-act="newmed-inline">+ Medikament anlegen</button>`}
+    </div>
+
+    <div class="field"><span class="lbl">Wetter beim Beginn</span>
+      <div id="f-weather">${weatherHTML(d.weather)}</div>
+      ${state.settings.weather ? `<button type="button" class="btn ghost" data-act="loadweather" style="justify-self:start">Wetter jetzt laden</button>` : ''}</div>
+
+    <div class="field"><label for="f-notes">Notizen</label>
+      <textarea id="f-notes" placeholder="Was war heute anders? Was hat geholfen?">${esc(d.notes)}</textarea></div>
+
+    ${!d._new ? `<button type="button" class="btn danger" data-act="delete">Eintrag löschen</button>` : ''}
+  </div>
+  <div class="sheet-foot"><button class="btn primary" data-act="saveattack">Speichern</button></div>`;
+  sheet.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function readAttackForm() {
+  const start = $('#f-start').value;
+  if (start) draft.start = new Date(start).toISOString();
+  const running = $('#f-running').getAttribute('aria-pressed') === 'true';
+  const end = $('#f-end').value;
+  draft.end = running ? null : (end ? new Date(end).toISOString() : new Date().toISOString());
+  draft.notes = $('#f-notes').value.trim();
+  $$('[data-medtime]').forEach(inp => {
+    const i = +inp.dataset.medtime;
+    if (inp.value) draft.meds[i].time = new Date(inp.value).toISOString();
+  });
+}
+
+function saveAttack() {
+  readAttackForm();
+  if (draft.end && new Date(draft.end) < new Date(draft.start)) { toast('Das Ende liegt vor dem Beginn.'); return; }
+  if (!draft.end && state.attacks.some(a => !a.end && a.id !== draft.id)) {
+    toast('Es läuft schon eine andere Attacke.'); return;
+  }
+  const { _new, ...clean } = draft;
+  const idx = state.attacks.findIndex(a => a.id === clean.id);
+  const startHour = `${dayKey(clean.start)}T${pad(new Date(clean.start).getHours())}:00`;
+  const needWeather = !clean.weather || clean.weather.for !== startHour;
+  if (idx >= 0) state.attacks[idx] = clean; else state.attacks.push(clean);
+  save();
+  closeSheet();
+  toast('Gespeichert');
+  if (needWeather) attachWeather(clean, true);
+}
+
+function closeSheet() {
+  $('#sheet').hidden = true;
+  $('#sheet').innerHTML = '';
+  document.body.style.overflow = '';
+  draft = null;
+  render();
+}
+
+/* ---------- Formular: Medikament ---------- */
+
+let medReturnToAttack = false;
+
+function openMed(id) {
+  const m = state.meds.find(x => x.id === id) || { id: uid(), name: '', type: 'analgetikum', since: '' };
+  const sheet = $('#sheet');
+  sheet.innerHTML = `<div class="sheet-inner" data-medid="${m.id}">
+    <div class="sheet-head"><h2>${id ? 'Medikament' : 'Neues Medikament'}</h2>
+      <button class="btn ghost" data-act="${medReturnToAttack ? 'backtoattack' : 'close'}">Abbrechen</button></div>
+    <div class="field"><label for="m-name">Name und Dosis</label>
+      <input type="text" id="m-name" value="${esc(m.name)}" placeholder="z. B. Sumatriptan 50 mg"></div>
+    <div class="field"><span class="lbl">Art</span>
+      <div class="chips" id="m-type">${Object.entries(MED_TYPES).map(([k, v]) =>
+        `<button type="button" class="chip" data-type="${k}" aria-pressed="${m.type === k}">${v}</button>`).join('')}</div></div>
+    <div class="field" id="m-since-f" ${m.type === 'prophylaxe' ? '' : 'hidden'}><label for="m-since">Eingenommen seit</label>
+      <input type="date" id="m-since" value="${m.since || ''}"></div>
+    ${id ? `<button type="button" class="btn danger" data-act="delmedication" data-id="${m.id}">Medikament löschen</button>` : ''}
+  </div>
+  <div class="sheet-foot"><button class="btn primary" data-act="savemed">Speichern</button></div>`;
+  sheet.hidden = false;
+  document.body.style.overflow = 'hidden';
+  if (!id) setTimeout(() => $('#m-name').focus(), 50);
+}
+
+function saveMed() {
+  const id = $('.sheet-inner').dataset.medid;
+  const name = $('#m-name').value.trim();
+  if (!name) { toast('Bitte einen Namen eingeben.'); return; }
+  const type = $('#m-type [aria-pressed=true]')?.dataset.type || 'sonstiges';
+  const since = type === 'prophylaxe' ? $('#m-since').value : '';
+  const existing = state.meds.find(x => x.id === id);
+  if (existing) Object.assign(existing, { name, type, since });
+  else state.meds.push({ id, name, type, since });
+  save();
+  if (medReturnToAttack && draft) {
+    medReturnToAttack = false;
+    if (type !== 'prophylaxe') draft.meds.push({ medId: id, time: new Date().toISOString(), effect: null });
+    renderAttackSheet();
+    return;
+  }
+  closeSheet();
+  toast('Gespeichert');
+}
+
+/* ---------- Backup ---------- */
+
+async function shareOrDownload(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const file = new File([blob], filename, { type: mime });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: filename }); return true; }
+    catch (e) { if (e.name === 'AbortError') return false; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  return true;
+}
+
+async function backup() {
+  const ok = await shareOrDownload(`migraene-backup-${dayKey(new Date())}.json`, JSON.stringify(state, null, 2), 'application/json');
+  if (ok) { state.settings.lastBackup = new Date().toISOString(); save(); render(); toast('Backup erstellt'); }
+}
+
+function restore(file) {
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const data = JSON.parse(r.result);
+      if (!Array.isArray(data.attacks) || !Array.isArray(data.meds)) throw new Error();
+      dialog(`Backup mit ${data.attacks.length} Attacken laden? Die aktuellen Daten werden ersetzt.`, { okText: 'Laden' }).then(ok => {
+        if (!ok) return;
+        state = Object.assign(defaultState(), data);
+        save(); render(); toast('Backup wiederhergestellt');
+      });
+    } catch (e) { toast('Diese Datei ist kein gültiges Backup.'); }
+  };
+  r.readAsText(file);
+}
+
+/* ---------- Arztbericht ---------- */
+
+let reportMonths = 3;
+
+function buildReport() {
+  const to = new Date();
+  const from = new Date(to.getFullYear(), to.getMonth() - reportMonths + 1, 1);
+  const list = attacksBetween(from, to).sort((a, b) => new Date(a.start) - new Date(b.start));
+  const name = state.settings.name.trim();
+
+  const monthRows = [];
+  for (let i = 0; i < reportMonths; i++) {
+    const f = new Date(from.getFullYear(), from.getMonth() + i, 1);
+    const t = new Date(f.getFullYear(), f.getMonth() + 1, 0, 23, 59);
+    const md = medDays(f, t);
+    const atts = attacksBetween(f, t);
+    monthRows.push(`<tr><td>${MONTHS[f.getMonth()]} ${f.getFullYear()}</td><td>${headacheDays(f, t)}</td><td>${atts.length}</td>
+      <td>${md.triptan}</td><td>${md.analgetikum}</td></tr>`);
+  }
+  const ints = list.filter(a => a.intensity);
+  const avg = ints.length ? (ints.reduce((s, a) => s + a.intensity, 0) / ints.length).toFixed(1).replace('.', ',') : '–';
+  const durs = list.filter(a => a.end).map(a => (new Date(a.end) - new Date(a.start)) / 3600000);
+  const avgDur = durs.length ? (durs.reduce((s, x) => s + x, 0) / durs.length).toFixed(1).replace('.', ',') : '–';
+  const triggers = countBy(list.flatMap(a => a.triggers || [])).slice(0, 6);
+  const proph = state.meds.filter(m => m.type === 'prophylaxe');
+  const warns = overuseWarnings();
+
+  return `
+    <div class="r-actions">
+      <button class="btn primary" data-act="print">Drucken / als PDF</button>
+      <button class="btn" data-act="sharereport">Teilen</button>
+      <button class="btn" data-act="closereport">Schließen</button>
+    </div>
+    <div class="r-period"><span>Zeitraum:</span>
+      <select id="r-months">${[1, 3, 6, 12].map(n => `<option value="${n}" ${n === reportMonths ? 'selected' : ''}>${n === 1 ? 'Aktueller Monat' : `Letzte ${n} Monate`}</option>`).join('')}</select></div>
+    <div id="r-body">
+    <h1>Kopfschmerzkalender${name ? ` – ${esc(name)}` : ''}</h1>
+    <p>Zeitraum: ${from.toLocaleDateString('de-DE')} – ${to.toLocaleDateString('de-DE')} · erstellt am ${to.toLocaleDateString('de-DE')}</p>
+
+    <h2>Übersicht</h2>
+    <div class="kv">
+      <div><b>${headacheDays(from, to)}</b>Kopfschmerztage</div>
+      <div><b>${list.length}</b>Attacken</div>
+      <div><b>${avg}</b>Ø Stärke (1–10)</div>
+      <div><b>${avgDur} h</b>Ø Dauer</div>
+      <div><b>${list.filter(a => (a.symptoms || []).includes('Aura')).length}</b>mit Aura</div>
+    </div>
+    ${warns.length ? `<div class="warnbox">⚠ Letzte 30 Tage: ${warns.join(' ')}</div>` : ''}
+
+    <h2>Pro Monat</h2>
+    <div class="tbl"><table><thead><tr><th>Monat</th><th>Kopfschmerztage</th><th>Attacken</th><th>Tage Triptan</th><th>Tage Schmerzmittel</th></tr></thead>
+    <tbody>${monthRows.join('')}</tbody></table></div>
+
+    ${proph.length ? `<h2>Prophylaxe</h2><ul>${proph.map(m => `<li>${esc(m.name)}${m.since ? ` (seit ${new Date(m.since).toLocaleDateString('de-DE')})` : ''}</li>`).join('')}</ul>` : ''}
+
+    ${triggers.length ? `<h2>Häufigste Auslöser</h2><p>${triggers.map(([k, n]) => `${esc(k)} (${n}×)`).join(', ')}</p>` : ''}
+
+    <h2>Alle Attacken</h2>
+    ${list.length ? `<div class="tbl"><table><thead><tr><th>Beginn</th><th>Dauer</th><th>Stärke</th><th>Ort / Symptome</th><th>Medikamente (Wirkung)</th><th>Auslöser / Notiz</th></tr></thead><tbody>
+      ${list.map(a => `<tr>
+        <td>${fmtDateTime(a.start)}</td>
+        <td>${a.end ? fmtDuration(a) : 'läuft'}</td>
+        <td>${a.intensity || '–'}</td>
+        <td>${esc([...(a.locations || []), ...(a.symptoms || [])].join(', '))}</td>
+        <td>${(a.meds || []).map(m => `${esc(medName(m))} ${fmtTime(m.time)}${m.effect != null ? ` (${EFFECTS[m.effect]})` : ''}`).join('<br>')}</td>
+        <td>${esc((a.triggers || []).join(', '))}${a.notes ? `<br><i>${esc(a.notes)}</i>` : ''}${a.weather ? `<br>${a.weather.pressure} hPa${a.weather.change24 != null ? ` (${a.weather.change24 > 0 ? '+' : ''}${a.weather.change24}/24h)` : ''}` : ''}</td>
+      </tr>`).join('')}</tbody></table></div>` : '<p>Keine Attacken im Zeitraum.</p>'}
+    </div>`;
+}
+
+function openReport() {
+  const r = $('#report');
+  r.innerHTML = buildReport();
+  r.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function reportFileHTML() {
+  const css = [...document.styleSheets].map(s => { try { return [...s.cssRules].map(r => r.cssText).join('\n'); } catch (e) { return ''; } }).join('\n');
+  return `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Kopfschmerzkalender</title><style>${css} body{padding:0;background:#fff}.report{position:static}</style></head>
+    <body><div class="report">${$('#r-body').outerHTML}</div></body></html>`;
+}
+
+/* ---------- Ereignisse ---------- */
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  const act = t.dataset.act;
+  const id = t.dataset.id;
+
+  // Formular-Interaktionen
+  if (t.closest('#sheet') && draft) {
+    if (t.dataset.pain) {
+      readAttackForm();
+      const n = +t.dataset.pain;
+      draft.intensity = draft.intensity === n ? 0 : n;
+      renderAttackSheet(); return;
+    }
+    if (t.parentElement.dataset.group && t.dataset.val !== undefined) {
+      const g = t.parentElement.dataset.group, v = t.dataset.val;
+      const on = t.getAttribute('aria-pressed') !== 'true';
+      t.setAttribute('aria-pressed', on);
+      draft[g] = on ? [...draft[g], v] : draft[g].filter(x => x !== v);
+      return;
+    }
+    if (t.dataset.addchip) {
+      readAttackForm();
+      const g = t.dataset.addchip;
+      dialog('Eigener Eintrag:', { input: true, okText: 'Hinzufügen' }).then(v => {
+        if (v && draft) { if (!draft[g].includes(v)) draft[g].push(v); renderAttackSheet(); }
+      });
+      return;
+    }
+    if (t.id === 'f-running') {
+      const on = t.getAttribute('aria-pressed') !== 'true';
+      t.setAttribute('aria-pressed', on);
+      const end = $('#f-end');
+      end.hidden = on;
+      if (!on && !end.value) end.value = toLocalInput(new Date());
+      return;
+    }
+    if (t.dataset.medeff !== undefined) {
+      readAttackForm();
+      const m = draft.meds[+t.dataset.medeff], v = +t.dataset.v;
+      m.effect = m.effect === v ? null : v;
+      renderAttackSheet(); return;
+    }
+    if (t.dataset.delmed !== undefined) {
+      readAttackForm(); draft.meds.splice(+t.dataset.delmed, 1); renderAttackSheet(); return;
+    }
+  }
+  if (t.closest('#m-type') && t.dataset.type) {
+    $$('#m-type .chip').forEach(c => c.setAttribute('aria-pressed', c === t));
+    $('#m-since-f').hidden = t.dataset.type !== 'prophylaxe';
+    return;
+  }
+
+  switch (act) {
+    case 'start': {
+      const a = { id: uid(), start: new Date().toISOString(), end: null, intensity: 0, locations: [], symptoms: [], triggers: [], meds: [], notes: '' };
+      state.attacks.push(a); save(); render();
+      toast('Attacke gestartet – gute Besserung');
+      attachWeather(a, true);
+      break;
+    }
+    case 'end': {
+      const a = state.attacks.find(x => x.id === id);
+      if (a) { a.end = new Date().toISOString(); save(); openAttack(a.id); toast('Beendet – magst du noch etwas ergänzen?'); }
+      break;
+    }
+    case 'new': openAttack(null); break;
+    case 'edit': openAttack(id); break;
+    case 'addmed': openAttack(id, true); break;
+    case 'close': closeSheet(); break;
+    case 'saveattack': saveAttack(); break;
+    case 'delete':
+      dialog('Diesen Eintrag wirklich löschen?', { okText: 'Löschen', danger: true }).then(ok => {
+        if (ok && draft) { state.attacks = state.attacks.filter(a => a.id !== draft.id); save(); closeSheet(); toast('Gelöscht'); }
+      });
+      break;
+    case 'loadweather':
+      readAttackForm();
+      $('#f-weather').innerHTML = '<span class="muted">Lade …</span>';
+      fetchWeather(draft.start)
+        .then(w => { if (draft) { draft.weather = w; $('#f-weather').innerHTML = weatherHTML(w); } })
+        .catch(() => { $('#f-weather').innerHTML = '<span class="muted">Konnte nicht geladen werden (Standort erlaubt? Internet?)</span>'; });
+      break;
+    case 'newmed-inline': readAttackForm(); medReturnToAttack = true; openMed(null); break;
+    case 'backtoattack': medReturnToAttack = false; renderAttackSheet(); break;
+    case 'newmed': openMed(null); break;
+    case 'editmed': openMed(id); break;
+    case 'savemed': saveMed(); break;
+    case 'delmedication':
+      dialog('Medikament löschen? Bereits eingetragene Einnahmen bleiben erhalten.', { okText: 'Löschen', danger: true }).then(ok => {
+        if (!ok) return;
+        const m = state.meds.find(x => x.id === id);
+        state.attacks.forEach(a => (a.meds || []).forEach(x => { if (x.medId === id) { x.name = m.name; x.type = m.type; } }));
+        state.meds = state.meds.filter(x => x.id !== id); save(); closeSheet();
+      });
+      break;
+    case 'toggleweather': state.settings.weather = !state.settings.weather; save(); render(); break;
+    case 'backup': backup(); break;
+    case 'restore': $('#restore-file').click(); break;
+    case 'wipe':
+      dialog('Wirklich ALLE Daten löschen? Das kann nicht rückgängig gemacht werden.', { okText: 'Alles löschen', danger: true }).then(ok => {
+        if (!ok) return;
+        const name = state.settings.name;
+        state = defaultState(); state.settings.name = name; state.settings.onboarded = true; save(); render(); toast('Alle Daten gelöscht');
+      });
+      break;
+    case 'report': openReport(); break;
+    case 'closereport': $('#report').hidden = true; document.body.style.overflow = ''; break;
+    case 'print': window.print(); break;
+    case 'sharereport': shareOrDownload(`kopfschmerzkalender-${dayKey(new Date())}.html`, reportFileHTML(), 'text/html'); break;
+    case 'onboard-done': {
+      state.settings.name = $('#ob-name').value.trim();
+      state.settings.weather = $('#ob-weather').getAttribute('aria-pressed') === 'true';
+      state.settings.onboarded = true; save();
+      $('#sheet').hidden = true; document.body.style.overflow = '';
+      render();
+      if (state.settings.weather) getCoords();
+      break;
+    }
+    case 'ob-weather': t.setAttribute('aria-pressed', t.getAttribute('aria-pressed') !== 'true'); t.textContent = t.getAttribute('aria-pressed') === 'true' ? 'An' : 'Aus'; break;
+  }
+});
+
+document.addEventListener('change', e => {
+  if (e.target.id === 'f-addmed') {
+    const v = e.target.value;
+    if (!v) return;
+    readAttackForm();
+    if (v === '__new') { medReturnToAttack = true; openMed(null); return; }
+    draft.meds.push({ medId: v, time: new Date().toISOString(), effect: null });
+    renderAttackSheet();
+  }
+  if (e.target.id === 'set-name') { state.settings.name = e.target.value.trim(); save(); }
+  if (e.target.id === 'restore-file' && e.target.files[0]) restore(e.target.files[0]);
+  if (e.target.id === 'r-months') { reportMonths = +e.target.value; openReport(); }
+});
+
+/* ---------- Erster Start ---------- */
+
+function onboarding() {
+  const sheet = $('#sheet');
+  sheet.innerHTML = `<div class="sheet-inner" style="padding-top:30px">
+    <div style="font-size:52px">☾</div>
+    <h2 style="font-size:26px">Dein Migräne-Tagebuch</h2>
+    <p class="muted">Hier kannst du Attacken, Medikamente und mögliche Auslöser festhalten – schnell, auch wenn's dir schlecht geht. Alles bleibt privat auf deinem Handy.</p>
+    <div class="field"><label for="ob-name">Wie heißt du?</label>
+      <input type="text" id="ob-name" placeholder="Vorname" autocomplete="given-name"></div>
+    <div class="row"><span>Luftdruck bei Attacken automatisch speichern?</span>
+      <button class="chip" data-act="ob-weather" id="ob-weather" aria-pressed="true">An</button></div>
+    <p class="small muted">Dafür fragt das iPhone gleich nach deinem Standort. Das kannst du später unter „Mehr“ ändern.</p>
+    <p class="small muted">Tipp: Öffne die Seite in Safari, tippe auf „Teilen“ → „Zum Home-Bildschirm“. Dann ist das Tagebuch wie eine App da – und deine Daten sind dauerhaft gespeichert.</p>
+  </div>
+  <div class="sheet-foot"><button class="btn primary" data-act="onboard-done">Los geht's</button></div>`;
+  sheet.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+/* ---------- Start ---------- */
+
+render();
+if (!state.settings.onboarded) onboarding();
+setInterval(() => { if (tab === 'home' && $('#sheet').hidden && activeAttack()) render(); }, 60000);
+
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
