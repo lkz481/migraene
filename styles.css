@@ -443,3 +443,99 @@ input[type=text], input[type=password], input[type=datetime-local], input[type=d
 /* Zeitfelder nebeneinander, ohne über die Spalte hinauszuragen */
 .time-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .time-grid input { min-width: 0; max-width: 100%; font-size: 14px; padding: 12px 8px; }
+
+/* ---------- Typografie & Abstände ----------
+   Lexend (SIL Open Font License, liegt lokal unter fonts/) – entwickelt für gute Lesbarkeit.
+   Feste Größenstufen und großzügigere Abstände, damit nichts gedrängt wirkt. */
+@font-face {
+  font-family: 'Lexend';
+  src: url('fonts/lexend.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+:root {
+  --font: 'Lexend', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --fs-xs: 12.5px; --fs-s: 14px; --fs-m: 16px; --fs-l: 19px; --fs-xl: 24px; --fs-xxl: 30px;
+  --gap: 20px;
+}
+body, button, input, select, textarea { font-family: var(--font); }
+body { font-size: var(--fs-m); line-height: 1.55; font-weight: 400; text-rendering: optimizeLegibility; }
+h1, h2, h3 { text-wrap: balance; }
+.topbar { padding: calc(16px + var(--safe-t)) 22px 14px; }
+.topbar h1 { font-size: var(--fs-xxl); font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+main { gap: var(--gap); padding: 6px 20px 36px; }
+h2 { font-size: var(--fs-l); font-weight: 600; letter-spacing: -.01em; line-height: 1.3; }
+h3, .h3 { font-size: var(--fs-xs); font-weight: 500; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); }
+.small, p.small { font-size: var(--fs-s); line-height: 1.5; }
+
+.greet { padding: 2px 2px 0; display: grid; gap: 4px; }
+.greet p:first-child { font-size: var(--fs-xl); font-weight: 600; letter-spacing: -.015em; line-height: 1.25; }
+.greet p:last-child { font-size: var(--fs-m); line-height: 1.5; }
+
+.card { padding: 20px; gap: 14px; border-radius: 20px; }
+.row { gap: 14px; }
+.grid2 { gap: 12px; }
+.stat { padding: 16px; border-radius: 14px; display: grid; gap: 2px; }
+.stat b { font-size: 30px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.stat span { font-size: var(--fs-s); color: var(--muted); line-height: 1.35; }
+
+.big-btn { font-size: var(--fs-l); font-weight: 600; letter-spacing: -.005em; padding: 24px 20px; border-radius: 22px; }
+.btn { font-size: var(--fs-m); font-weight: 500; padding: 14px 18px; min-height: 50px; border-radius: 14px; line-height: 1.3; }
+.btn.ghost { min-height: 0; padding: 8px 4px; }
+
+.chips { gap: 10px; }
+.chip { font-size: 15px; padding: 10px 16px; min-height: 44px; line-height: 1.25; }
+.tag { font-size: var(--fs-xs); font-weight: 500; padding: 3px 10px; letter-spacing: .01em; }
+
+.list { gap: 12px; }
+.entry { padding: 16px; gap: 14px; border-radius: 18px; }
+.entry .t { font-size: var(--fs-m); font-weight: 600; line-height: 1.35; }
+.entry .s { font-size: var(--fs-s); line-height: 1.45; }
+.entry-main { gap: 4px; }
+.pain { font-size: 18px; font-weight: 600; }
+.list-head { margin: 6px 2px 0; }
+
+.field { gap: 10px; }
+.field > label, .field > .lbl, .lbl, .form-sec .lbl { font-size: var(--fs-s); font-weight: 500; color: var(--muted); }
+input[type=text], input[type=password], input[type=datetime-local], input[type=date], input[type=number], select, textarea { font-size: var(--fs-m); padding: 14px 16px; border-radius: 14px; }
+
+.sheet { padding: calc(14px + var(--safe-t)) 20px calc(120px + var(--safe-b)); }
+.sheet-inner { gap: 24px; }
+.sheet-head h2 { font-size: var(--fs-xl); }
+.form-sec { gap: 12px; }
+.fold > summary { font-size: var(--fs-m); font-weight: 500; min-height: 58px; }
+.fold { border-radius: 18px; padding: 0 16px; }
+.fold[open] { padding-bottom: 16px; }
+
+.flow { gap: 18px; }
+.flow-q { font-size: 28px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; margin-top: 10px; }
+.flow .muted { font-size: var(--fs-m); line-height: 1.5; }
+.flow-count { font-size: var(--fs-s); }
+.choice { font-size: 18px; font-weight: 500; min-height: 66px; border-radius: 18px; }
+.flow-summary { font-size: var(--fs-s); gap: 8px; padding: 16px 18px; line-height: 1.45; }
+.flow-done h2 { font-size: var(--fs-xl); }
+
+.level-picker { gap: 12px; }
+.level-card { min-height: 80px; padding: 16px 18px; gap: 16px; }
+.level-text { gap: 3px; }
+.level-text b { font-size: var(--fs-l); font-weight: 600; letter-spacing: -.01em; }
+.level-text span { font-size: var(--fs-s); line-height: 1.4; }
+.level-num { font-size: 17px; font-variant-numeric: tabular-nums; }
+
+.tabbar button { font-size: 11px; font-weight: 500; letter-spacing: .01em; gap: 3px; }
+.cal-head h2 { font-size: var(--fs-l); }
+.cal-day { font-size: 15px; }
+.cal-sum { font-size: var(--fs-s); gap: 18px; }
+.cal-sum b { font-size: 18px; font-weight: 600; }
+.bars { gap: 10px; }
+.bar { font-size: var(--fs-s); grid-template-columns: 116px 1fr 36px; }
+.col { font-size: var(--fs-xs); }
+.col .v { font-size: var(--fs-s); font-weight: 500; }
+.set-row b { font-weight: 600; }
+.dlg { padding: 22px; gap: 18px; border-radius: 20px; }
+.dlg p { font-size: var(--fs-m); line-height: 1.5; }
+.toast { font-size: var(--fs-s); font-weight: 500; }
+.weather { font-size: var(--fs-s); }
+.report { font-family: var(--font); }

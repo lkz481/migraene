@@ -63,3 +63,8 @@ bekommen, in `sw.js` die Zeile `const VERSION = 'migraene-v1'` hochzählen (v2, 
 - **Backups sind immer mit Passwort verschlüsselt.** Beim Wiederherstellen werden alle Inhalte geprüft und bereinigt.
 - Hinweis: Alle Seiten unter derselben github.io-Adresse teilen sich den Browser-Speicher. Daher keine fremden
   Seiten im selben GitHub-Konto veröffentlichen – oder den PIN-Schutz nutzen.
+
+## Schrift
+
+Lexend (© The Lexend Project Authors), lizenziert unter der SIL Open Font License 1.1 – siehe `fonts/OFL-Lexend.txt`.
+Die Schrift liegt lokal in der App; es wird nichts von externen Servern geladen.
