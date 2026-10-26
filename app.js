@@ -17,6 +17,7 @@ const TRIGGERS = ['Schlafmangel', 'Zu viel Schlaf', 'Stress', 'Entspannung nach 
   'Koffein', 'Mahlzeit ausgelassen', 'Zu wenig getrunken', 'Wetterwechsel', 'Bildschirm', 'Grelles Licht',
   'Lärm', 'Gerüche', 'Sport', 'Bestimmtes Essen', 'Reisen', 'Verspannung'];
 const CORE_SYMPTOMS = ['Übelkeit', 'Erbrechen', 'Lichtempfindlich', 'Lärmempfindlich'];
+const PAIN_GROUPS = [['Leicht', [1, 2, 3]], ['Mittel', [4, 5, 6]], ['Stark', [7, 8, 9, 10]]];
 const IMPAIRMENT = ['Kaum', 'Etwas', 'Stark', 'Bettlägerig'];
 const MED_TYPES = {
   triptan: 'Triptan',
@@ -68,6 +69,16 @@ function fmtDuration(a) {
   if (h >= 24) return `${Math.floor(h / 24)} T ${h % 24} Std`;
   return h ? `${h} Std ${min} Min` : `${min} Min`;
 }
+// Schmerzskala in Gruppen, damit klar ist, welche Zahl was bedeutet
+function painScaleHTML(selected, attr, big) {
+  return `<div class="pain-scale${big ? ' big' : ''}">${PAIN_GROUPS.map(([label, nums]) => `
+    <div class="pain-group">
+      <span class="pain-label">${label} <span class="muted">${nums[0]}–${nums[nums.length - 1]}</span></span>
+      <div class="pain-row">${nums.map(n =>
+        `<button type="button" class="pain-btn" ${attr}="${n}" aria-pressed="${selected === n}" aria-label="${n} – ${label}" style="--pc:${painColor(n)}">${n}</button>`).join('')}</div>
+    </div>`).join('')}</div>`;
+}
+
 function painColor(n) {
   if (!n) return '#3a3f4e';
   const hues = [150, 135, 110, 85, 60, 45, 30, 15, 5, 350];
@@ -806,9 +817,8 @@ function renderAttackSheet() {
     </section>
 
     <section class="form-sec">
-      <span class="lbl">Stärke <span class="muted">(1 = leicht, 10 = unerträglich)</span></span>
-      <div class="scale">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n =>
-        `<button type="button" data-pain="${n}" aria-pressed="${d.intensity === n}" style="${d.intensity === n ? `background:${painColor(n)}` : ''}">${n}</button>`).join('')}</div>
+      <span class="lbl">Stärke <span class="muted">(1 = kaum spürbar, 10 = unerträglich)</span></span>
+      ${painScaleHTML(d.intensity, 'data-pain', false)}
       <span class="lbl">Wie sehr schränkt es dich ein?</span>
       <div class="effect">${IMPAIRMENT.map((t, i) => `<button type="button" data-imp="${i}" aria-pressed="${d.impairment === i}">${t}</button>`).join('')}</div>
     </section>
@@ -951,10 +961,8 @@ function flowStep(a, key) {
         <button class="choice" data-fset="aura" data-v="" aria-pressed="false">Weiß ich noch nicht</button></div>`
     };
     case 'pain': return {
-      q: 'Wie stark ist der Schmerz?', sub: '1 = leicht, 10 = unerträglich',
-      body: `<div class="flow-pain">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n =>
-        `<button class="pain-btn" data-fset="intensity" data-v="${n}" aria-pressed="${a.intensity === n}" style="--pc:${painColor(n)}">${n}</button>`).join('')}</div>
-        <div class="flow-scale-legend"><span>leicht</span><span>mittel</span><span>stark</span></div>`
+      q: 'Wie stark ist der Schmerz?', sub: '1 = kaum spürbar, 10 = unerträglich',
+      body: painScaleHTML(a.intensity, 'data-fset="intensity" data-v', true)
     };
     case 'meds': return {
       q: 'Hast du schon etwas genommen?', sub: own.length ? 'Antippen zum Auswählen – mehrere sind möglich.' : 'Wähle dein Mittel aus der Liste.',

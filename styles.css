@@ -18,6 +18,7 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
 body {
   font: 17px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
@@ -359,3 +360,14 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .stale-grid .choice { display: grid; gap: 2px; font-size: 18px; min-height: 72px; }
 .stale-grid .choice small { font-size: 12px; font-weight: 400; color: var(--muted); }
 .stale-grid .choice:only-child { grid-column: 1 / -1; }
+
+/* Gruppierte Schmerzskala */
+.pain-scale { display: grid; gap: 10px; }
+.pain-group { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 10px; }
+.pain-label { font-size: 15px; font-weight: 600; }
+.pain-label .muted { display: block; font-weight: 400; font-size: 13px; }
+.pain-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.pain-scale .pain-btn { aspect-ratio: auto; height: 50px; font-size: 18px; border-radius: 12px; }
+.pain-scale.big .pain-btn { height: 62px; font-size: 22px; border-radius: 14px; }
+.time-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.time-grid input { min-width: 0; max-width: 100%; font-size: 14px; padding: 12px 8px; }
