@@ -371,3 +371,50 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .pain-scale.big .pain-btn { height: 62px; font-size: 22px; border-radius: 14px; }
 .time-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .time-grid input { min-width: 0; max-width: 100%; font-size: 14px; padding: 12px 8px; }
+
+/* ---------- Glas-Optik ----------
+   Dezenter Farbschimmer im Hintergrund, Kacheln leicht durchscheinend mit Weichzeichner. */
+:root {
+  --glass: rgba(255, 255, 255, .055);
+  --glass-strong: rgba(255, 255, 255, .085);
+  --glass-line: rgba(255, 255, 255, .09);
+  --glass-hi: rgba(255, 255, 255, .07);
+  --glass-blur: blur(18px) saturate(150%);
+  --ambient:
+    radial-gradient(60% 45% at 12% 8%, rgba(169, 156, 240, .22), transparent 70%),
+    radial-gradient(55% 40% at 95% 55%, rgba(176, 92, 140, .16), transparent 70%),
+    radial-gradient(50% 35% at 20% 100%, rgba(120, 140, 230, .12), transparent 70%);
+}
+body { background: var(--bg); }
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: var(--ambient), var(--bg);
+}
+.topbar { background: linear-gradient(rgba(20, 22, 28, .75) 60%, transparent); }
+.sheet { background: var(--ambient), var(--bg); background-attachment: fixed; }
+
+.card, .entry, .stat, .fold, .med-row, .choice, .flow-summary, .dlg, .chip, .seg button,
+.effect button, .icon-btn, .btn:not(.primary):not(.ghost), .pain-btn, .cal-day:not(.has),
+input[type=text], input[type=password], input[type=datetime-local], input[type=date], input[type=number], select, textarea {
+  background-color: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+.card, .entry, .fold, .flow-summary, .dlg, .med-row {
+  border: 1px solid var(--glass-line);
+  box-shadow: inset 0 1px 0 var(--glass-hi), 0 8px 24px rgba(0, 0, 0, .18);
+}
+.stat { background-color: var(--glass-strong); border: 1px solid rgba(255, 255, 255, .05); }
+.cal-day:not(.has) { background-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.card.warn { background-color: rgba(226, 182, 108, .12); }
+.card.running { border-color: var(--accent); }
+.choice[aria-pressed=true], .chip[aria-pressed=true], .seg button[aria-pressed=true], .effect button[aria-pressed=true] { background-color: var(--accent-soft); }
+.pain-btn[aria-pressed=true] { background-color: var(--pc); }
+.big-btn.active { background-color: var(--glass-strong); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
+.dlg-wrap { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.dlg { background-color: rgba(30, 32, 42, .82); }
+/* Arztbericht bleibt bewusst schlicht weiß zum Drucken */
+.report * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+@media (prefers-reduced-transparency: reduce) {
+  .card, .entry, .stat, .fold, .med-row, .choice, .flow-summary, .dlg, .chip { background-color: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
