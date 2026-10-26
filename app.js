@@ -17,7 +17,18 @@ const TRIGGERS = ['Schlafmangel', 'Zu viel Schlaf', 'Stress', 'Entspannung nach 
   'Koffein', 'Mahlzeit ausgelassen', 'Zu wenig getrunken', 'Wetterwechsel', 'Bildschirm', 'Grelles Licht',
   'Lärm', 'Gerüche', 'Sport', 'Bestimmtes Essen', 'Reisen', 'Verspannung'];
 const CORE_SYMPTOMS = ['Übelkeit', 'Erbrechen', 'Lichtempfindlich', 'Lärmempfindlich'];
-const PAIN_GROUPS = [['Leicht', [1, 2, 3]], ['Mittel', [4, 5, 6]], ['Stark', [7, 8, 9, 10]]];
+// Was jede Stufe im Alltag bedeutet – wird beim Schieben angezeigt
+const PAIN_WORDS = [null,
+  ['Kaum spürbar', 'Fällt nur auf, wenn du darauf achtest'],
+  ['Sehr leicht', 'Stört kaum'],
+  ['Leicht', 'Lenkt etwas ab, der Alltag geht'],
+  ['Spürbar', 'Stört bei der Konzentration'],
+  ['Mittel', 'Der Alltag ist eingeschränkt'],
+  ['Deutlich', 'Konzentrieren fällt schwer'],
+  ['Stark', 'Der Alltag ist kaum noch möglich'],
+  ['Sehr stark', 'Du musst dich hinlegen'],
+  ['Kaum auszuhalten', 'Es geht gar nichts mehr'],
+  ['Unerträglich', 'Der schlimmste Schmerz, den du dir vorstellen kannst']];
 const IMPAIRMENT = ['Kaum', 'Etwas', 'Stark', 'Bettlägerig'];
 const MED_TYPES = {
   triptan: 'Triptan',
@@ -69,14 +80,34 @@ function fmtDuration(a) {
   if (h >= 24) return `${Math.floor(h / 24)} T ${h % 24} Std`;
   return h ? `${h} Std ${min} Min` : `${min} Min`;
 }
-// Schmerzskala in Gruppen, damit klar ist, welche Zahl was bedeutet
-function painScaleHTML(selected, attr, big) {
-  return `<div class="pain-scale${big ? ' big' : ''}">${PAIN_GROUPS.map(([label, nums]) => `
-    <div class="pain-group">
-      <span class="pain-label">${label} <span class="muted">${nums[0]}–${nums[nums.length - 1]}</span></span>
-      <div class="pain-row">${nums.map(n =>
-        `<button type="button" class="pain-btn" ${attr}="${n}" aria-pressed="${selected === n}" aria-label="${n} – ${label}" style="--pc:${painColor(n)}">${n}</button>`).join('')}</div>
-    </div>`).join('')}</div>`;
+// Schmerz-Schieberegler: große Zahl, Wort und Beschreibung ändern sich beim Schieben
+function painSliderHTML(value) {
+  const v = value || 5;
+  const [word, desc] = PAIN_WORDS[v];
+  return `<div class="pain-slider${value ? '' : ' unset'}" style="--pc:${painColor(v)}">
+    <div class="pain-readout" aria-hidden="true">
+      <span class="pain-num">${value ? v : '–'}</span>
+      <span class="pain-word">${value ? word : 'Regler bewegen'}</span>
+      <span class="pain-desc">${value ? desc : 'Schieb oder tippe auf die Stelle, die passt'}</span>
+    </div>
+    <input type="range" class="pain-range" min="1" max="10" step="1" value="${v}"
+      aria-label="Schmerzstärke" aria-valuetext="${value ? `${v} – ${word}` : 'noch nicht angegeben'}">
+    <div class="pain-ticks" aria-hidden="true">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<span>${n}</span>`).join('')}</div>
+    <div class="pain-ends" aria-hidden="true"><span>kaum spürbar</span><span>unerträglich</span></div>
+  </div>`;
+}
+
+function updatePainSlider(range) {
+  const v = +range.value;
+  const box = range.closest('.pain-slider');
+  const [word, desc] = PAIN_WORDS[v];
+  box.classList.remove('unset');
+  box.style.setProperty('--pc', painColor(v));
+  $('.pain-num', box).textContent = v;
+  $('.pain-word', box).textContent = word;
+  $('.pain-desc', box).textContent = desc;
+  range.setAttribute('aria-valuetext', `${v} – ${word}`);
+  return v;
 }
 
 function painColor(n) {
@@ -817,8 +848,8 @@ function renderAttackSheet() {
     </section>
 
     <section class="form-sec">
-      <span class="lbl">Stärke <span class="muted">(1 = kaum spürbar, 10 = unerträglich)</span></span>
-      ${painScaleHTML(d.intensity, 'data-pain', false)}
+      <span class="lbl">Stärke</span>
+      ${painSliderHTML(d.intensity)}
       <span class="lbl">Wie sehr schränkt es dich ein?</span>
       <div class="effect">${IMPAIRMENT.map((t, i) => `<button type="button" data-imp="${i}" aria-pressed="${d.impairment === i}">${t}</button>`).join('')}</div>
     </section>
@@ -961,8 +992,9 @@ function flowStep(a, key) {
         <button class="choice" data-fset="aura" data-v="" aria-pressed="false">Weiß ich noch nicht</button></div>`
     };
     case 'pain': return {
-      q: 'Wie stark ist der Schmerz?', sub: '1 = kaum spürbar, 10 = unerträglich',
-      body: painScaleHTML(a.intensity, 'data-fset="intensity" data-v', true)
+      q: 'Wie stark ist der Schmerz?', sub: '',
+      body: painSliderHTML(a.intensity),
+      next: 'Weiter'
     };
     case 'meds': return {
       q: 'Hast du schon etwas genommen?', sub: own.length ? 'Antippen zum Auswählen – mehrere sind möglich.' : 'Wähle dein Mittel aus der Liste.',
@@ -1042,7 +1074,7 @@ function renderFlow() {
     </div>
     ${multi ? `<div class="flow-dots" aria-hidden="true">${steps.map((_, i) => `<i class="${i <= flow.step ? 'on' : ''}"></i>`).join('')}</div>` : ''}
     <h2 class="flow-q">${st.q}</h2>
-    <p class="muted">${st.sub}</p>
+    ${st.sub ? `<p class="muted">${st.sub}</p>` : ''}
     ${st.body}
   </div>
   <div class="sheet-foot">
@@ -1506,12 +1538,6 @@ document.addEventListener('click', e => {
 
   // Formular-Interaktionen
   if (t.closest('#sheet') && draft) {
-    if (t.dataset.pain) {
-      readAttackForm();
-      const n = +t.dataset.pain;
-      draft.intensity = draft.intensity === n ? 0 : n;
-      renderAttackSheet(); return;
-    }
     if (t.dataset.aura !== undefined) {
       const v = t.dataset.aura === '1';
       draft.aura = draft.aura === v ? null : v;
@@ -1654,11 +1680,27 @@ document.addEventListener('click', e => {
   }
 });
 
+document.addEventListener('pointerdown', e => {
+  const r = e.target.closest && e.target.closest('.pain-range');
+  if (!r) return;
+  const box = r.getBoundingClientRect();
+  const pct = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+  r.value = Math.round(1 + pct * 9);
+  r.dispatchEvent(new Event('input', { bubbles: true }));
+});
+
 document.addEventListener('toggle', e => {
   if (draft && e.target.dataset && e.target.dataset.fold) draft._open[e.target.dataset.fold] = e.target.open;
 }, true);
 
 document.addEventListener('input', e => {
+  if (e.target.classList.contains('pain-range')) {
+    const v = updatePainSlider(e.target);
+    if (draft && e.target.closest('#sheet') && !flow) draft.intensity = v;
+    const a = flow && flowAttack();
+    if (a) { a.intensity = v; save(); }
+    return;
+  }
   if (e.target.id !== 'm-search') return;
   const q = e.target.value.trim().toLowerCase();
   $$('#m-sugg .sugg-group').forEach(g => {
