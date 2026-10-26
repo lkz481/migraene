@@ -17,18 +17,14 @@ const TRIGGERS = ['Schlafmangel', 'Zu viel Schlaf', 'Stress', 'Entspannung nach 
   'Koffein', 'Mahlzeit ausgelassen', 'Zu wenig getrunken', 'Wetterwechsel', 'Bildschirm', 'Grelles Licht',
   'Lärm', 'Gerüche', 'Sport', 'Bestimmtes Essen', 'Reisen', 'Verspannung'];
 const CORE_SYMPTOMS = ['Übelkeit', 'Erbrechen', 'Lichtempfindlich', 'Lärmempfindlich'];
-// Was jede Stufe im Alltag bedeutet – wird beim Schieben angezeigt
-const PAIN_WORDS = [null,
-  ['Kaum spürbar', 'Fällt nur auf, wenn du darauf achtest'],
-  ['Sehr leicht', 'Stört kaum'],
-  ['Leicht', 'Lenkt etwas ab, der Alltag geht'],
-  ['Spürbar', 'Stört bei der Konzentration'],
-  ['Mittel', 'Der Alltag ist eingeschränkt'],
-  ['Deutlich', 'Konzentrieren fällt schwer'],
-  ['Stark', 'Der Alltag ist kaum noch möglich'],
-  ['Sehr stark', 'Du musst dich hinlegen'],
-  ['Kaum auszuhalten', 'Es geht gar nichts mehr'],
-  ['Unerträglich', 'Der schlimmste Schmerz, den du dir vorstellen kannst']];
+// Schmerzstärke nach Alltag – wie im ärztlichen Kopfschmerzkalender; Zahl 1–10 optional verfeinert
+const LEVELS = [
+  { name: 'Leicht', desc: 'Ich kann normal weitermachen', nums: [1, 2, 3], def: 3 },
+  { name: 'Mittel', desc: 'Ich muss mich einschränken', nums: [4, 5, 6], def: 5 },
+  { name: 'Stark', desc: 'Ich muss mich hinlegen', nums: [7, 8, 9, 10], def: 8 }
+];
+const levelOf = n => (!n ? null : n <= 3 ? 0 : n <= 6 ? 1 : 2);
+const levelText = n => (levelOf(n) === null ? '–' : `${LEVELS[levelOf(n)].name} (${n})`);
 const IMPAIRMENT = ['Kaum', 'Etwas', 'Stark', 'Bettlägerig'];
 const MED_TYPES = {
   triptan: 'Triptan',
@@ -80,40 +76,26 @@ function fmtDuration(a) {
   if (h >= 24) return `${Math.floor(h / 24)} T ${h % 24} Std`;
   return h ? `${h} Std ${min} Min` : `${min} Min`;
 }
-// Schmerz-Schieberegler: große Zahl, Wort und Beschreibung ändern sich beim Schieben
-function painSliderHTML(value) {
-  const v = value || 5;
-  const [word, desc] = PAIN_WORDS[v];
-  return `<div class="pain-slider${value ? '' : ' unset'}" style="--pc:${painColor(v)}">
-    <div class="pain-readout" aria-hidden="true">
-      <span class="pain-num">${value ? v : '–'}</span>
-      <span class="pain-word">${value ? word : 'Regler bewegen'}</span>
-      <span class="pain-desc">${value ? desc : 'Schieb oder tippe auf die Stelle, die passt'}</span>
-    </div>
-    <input type="range" class="pain-range" min="1" max="10" step="1" value="${v}"
-      aria-label="Schmerzstärke" aria-valuetext="${value ? `${v} – ${word}` : 'noch nicht angegeben'}">
-    <div class="pain-ticks" aria-hidden="true">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<span>${n}</span>`).join('')}</div>
-    <div class="pain-ends" aria-hidden="true"><span>kaum spürbar</span><span>unerträglich</span></div>
+function levelPickerHTML(value) {
+  const lv = levelOf(value);
+  return `<div class="level-picker">
+    ${LEVELS.map((l, i) => `
+      <button type="button" class="level-card" data-level="${i}" aria-pressed="${lv === i}" style="--pc:${painColor(l.def)}">
+        <span class="level-bars" aria-hidden="true">${[0, 1, 2].map(k => `<i class="${k <= i ? 'on' : ''}"></i>`).join('')}</span>
+        <span class="level-text"><b>${l.name}</b><span>${l.desc}</span></span>
+      </button>`).join('')}
+    ${lv !== null ? `<div class="level-fine">
+      <span class="small muted">Genauer (freiwillig):</span>
+      <div class="level-nums">${LEVELS[lv].nums.map(n =>
+        `<button type="button" class="level-num" data-fine="${n}" aria-pressed="${value === n}" style="--pc:${painColor(n)}">${n}</button>`).join('')}</div>
+    </div>` : ''}
   </div>`;
-}
-
-function updatePainSlider(range) {
-  const v = +range.value;
-  const box = range.closest('.pain-slider');
-  const [word, desc] = PAIN_WORDS[v];
-  box.classList.remove('unset');
-  box.style.setProperty('--pc', painColor(v));
-  $('.pain-num', box).textContent = v;
-  $('.pain-word', box).textContent = word;
-  $('.pain-desc', box).textContent = desc;
-  range.setAttribute('aria-valuetext', `${v} – ${word}`);
-  return v;
 }
 
 function painColor(n) {
   if (!n) return '#3a3f4e';
-  const hues = [150, 135, 110, 85, 60, 45, 30, 15, 5, 350];
-  return `hsl(${hues[n - 1]} 55% 68%)`;
+  const hue = 262 + (n - 1) * 9.6;                       // 262 = Lila … 348 = tiefes Rot
+  return `hsl(${hue.toFixed(0)} ${42 + n * 3}% ${77 - n * 2.2}%)`;
 }
 const hasAura = a => a.aura === true;
 const auraText = a => (a.aura === true ? 'ja' : a.aura === false ? 'nein' : '–');
@@ -523,7 +505,7 @@ function viewHome() {
     ${act ? `
       <div class="card running">
         <div class="row"><h2>Attacke läuft</h2><span class="muted">${fmtDuration(act)}</span></div>
-        <p class="muted small">Seit ${fmtDateTime(act.start)}${act.intensity ? ` · Stärke ${act.intensity}/10` : ''}${hasAura(act) ? ' · mit Aura' : ''}</p>
+        <p class="muted small">Seit ${fmtDateTime(act.start)}${act.intensity ? ` · ${levelText(act.intensity)}` : ''}${hasAura(act) ? ' · mit Aura' : ''}</p>
         <div class="grid2">
           <button class="btn" data-act="edit" data-id="${act.id}">Details ergänzen</button>
           <button class="btn" data-act="addmed" data-id="${act.id}">Medikament</button>
@@ -565,7 +547,7 @@ function dayInfo() {
 
 function entryHTML(a) {
   const meds = (a.meds || []).map(medName).join(', ');
-  const imp = a.impairment !== null && a.impairment !== undefined ? ` · ${IMPAIRMENT[a.impairment]} eingeschränkt` : '';
+  const imp = a.intensity ? ` · ${LEVELS[levelOf(a.intensity)].name}` : '';
   return `<button class="entry" data-act="edit" data-id="${a.id}">
     <span class="pain" style="background:${painColor(a.intensity)}">${a.intensity || '–'}</span>
     <span class="entry-main">
@@ -680,7 +662,7 @@ function viewStats() {
   const wdMax = Math.max(1, ...wdOrdered.map(w => w[1]));
   const tod = [['Nacht (0–6)', 0], ['Morgen (6–12)', 0], ['Nachmittag (12–18)', 0], ['Abend (18–24)', 0]];
   A.forEach(a => { tod[Math.floor(new Date(a.start).getHours() / 6)][1]++; });
-  const imp = countBy(A.filter(a => a.impairment !== null && a.impairment !== undefined).map(a => IMPAIRMENT[a.impairment]));
+  const imp = LEVELS.map((l, i) => [`${l.name} – ${l.desc.charAt(0).toLowerCase() + l.desc.slice(1)}`, A.filter(a => levelOf(a.intensity) === i).length]).filter(x => x[1]);
 
   const W = A.filter(a => a.weather && a.weather.change24 !== null);
   let weatherCard = '';
@@ -723,7 +705,7 @@ function viewStats() {
     <div class="card"><h3>Häufigste Auslöser</h3>${barsHTML(triggers, total)}
       <p class="small muted">Anteil der Attacken, bei denen der Auslöser notiert wurde.</p></div>
     ${weatherCard}
-    ${imp.length ? `<div class="card"><h3>Einschränkung im Alltag</h3>${barsHTML(imp, total)}</div>` : ''}
+    ${imp.length ? `<div class="card"><h3>Stärke der Attacken</h3>${barsHTML(imp, total)}</div>` : ''}
     <div class="card"><h3>Wochentage</h3>
       <div class="cols">${wdOrdered.map(([w, n]) => `<div class="col"><span class="v">${n}</span>
         <span class="b" style="height:${(n / wdMax) * 100}px"></span><span>${w}</span></div>`).join('')}</div></div>
@@ -848,10 +830,8 @@ function renderAttackSheet() {
     </section>
 
     <section class="form-sec">
-      <span class="lbl">Stärke</span>
-      ${painSliderHTML(d.intensity)}
-      <span class="lbl">Wie sehr schränkt es dich ein?</span>
-      <div class="effect">${IMPAIRMENT.map((t, i) => `<button type="button" data-imp="${i}" aria-pressed="${d.impairment === i}">${t}</button>`).join('')}</div>
+      <span class="lbl">Wie stark ist der Schmerz?</span>
+      ${levelPickerHTML(d.intensity)}
     </section>
 
     <section class="form-sec">
@@ -962,7 +942,7 @@ function closeSheet() {
 
 const FLOWS = {
   start: ['aura', 'pain', 'meds', 'symptoms'],     // beim Start einer Attacke
-  end: ['impairment', 'where', 'triggers', 'notes'], // beim Beenden, wenn ergänzt werden soll
+  end: ['where', 'triggers', 'notes'],              // beim Beenden, wenn ergänzt werden soll
   meds: ['meds']                                     // nur Medikament nachtragen
 };
 let flow = null;   // { id, kind, step, more }
@@ -993,8 +973,8 @@ function flowStep(a, key) {
     };
     case 'pain': return {
       q: 'Wie stark ist der Schmerz?', sub: '',
-      body: painSliderHTML(a.intensity),
-      next: 'Weiter'
+      body: levelPickerHTML(a.intensity),
+      next: a.intensity ? 'Weiter' : null
     };
     case 'meds': return {
       q: 'Hast du schon etwas genommen?', sub: own.length ? 'Antippen zum Auswählen – mehrere sind möglich.' : 'Wähle dein Mittel aus der Liste.',
@@ -1015,11 +995,6 @@ function flowStep(a, key) {
         next: 'Fertig'
       };
     }
-    case 'impairment': return {
-      q: 'Wie sehr hat dich die Attacke eingeschränkt?', sub: 'Im Alltag, bei der Arbeit oder in der Freizeit.',
-      body: `<div class="flow-choices">${IMPAIRMENT.map((t, i) =>
-        `<button class="choice" data-fset="impairment" data-v="${i}" aria-pressed="${a.impairment === i}">${t}</button>`).join('')}</div>`
-    };
     case 'where': return {
       q: 'Wo saß der Schmerz?', sub: 'Mehrere Antworten möglich.',
       body: flowChips('locations', LOCATIONS, a),
@@ -1053,10 +1028,9 @@ function renderFlow() {
       <p class="muted">${done ? 'Ruh dich aus. Wenn die Attacke vorbei ist, tippe auf der Startseite auf „Attacke beenden“.' : 'Gute Erholung!'}</p>
       <div class="flow-summary">
         <span>Aura: <b>${auraText(a)}</b></span>
-        <span>Stärke: <b>${a.intensity || '–'}</b></span>
+        <span>Stärke: <b>${levelText(a.intensity)}</b></span>
         ${a.meds.length ? `<span>Medikamente: <b>${esc(a.meds.map(medName).join(', '))}</b></span>` : ''}
         ${a.symptoms.length ? `<span>Beschwerden: <b>${esc(a.symptoms.join(', '))}</b></span>` : ''}
-        ${a.impairment !== null ? `<span>Einschränkung: <b>${IMPAIRMENT[a.impairment]}</b></span>` : ''}
       </div>
       <button class="btn primary block" data-flow="close">Schließen</button>
       <button class="btn ghost" data-flow="full">Alles ansehen und bearbeiten</button>
@@ -1201,7 +1175,7 @@ function finishStale(a, endMs) {
   stale = null;
   $('#sheet').hidden = true; $('#sheet').innerHTML = '';
   render();
-  dialog(`Gespeichert: Dauer ${fmtDuration(a)}. Möchtest du noch etwas ergänzen – Einschränkung, Schmerzort, Auslöser, Notiz?`, { okText: 'Ja, ergänzen', cancelText: 'Nein, fertig' })
+  dialog(`Gespeichert: Dauer ${fmtDuration(a)}. Möchtest du noch etwas ergänzen – Schmerzort, Auslöser, Notiz?`, { okText: 'Ja, ergänzen', cancelText: 'Nein, fertig' })
     .then(more => { if (more) openFlow(a.id, 'end'); else { document.body.style.overflow = ''; toast('Alles gespeichert'); } });
 }
 
@@ -1459,7 +1433,7 @@ function buildReport() {
   const triggers = countBy(list.flatMap(a => a.triggers || [])).slice(0, 6);
   const proph = state.meds.filter(m => m.type === 'prophylaxe');
   const warns = overuseWarnings();
-  const severe = list.filter(a => a.impairment >= 2).length;
+  const severe = list.filter(a => levelOf(a.intensity) === 2).length;
 
   return `
     <div class="r-actions">
@@ -1480,7 +1454,7 @@ function buildReport() {
       <div><b>${list.filter(hasAura).length} / ${list.filter(a => a.aura === false).length}</b>mit / ohne Aura</div>
       <div><b>${avg}</b>Ø Stärke (1–10)</div>
       <div><b>${avgDur} h</b>Ø Dauer</div>
-      <div><b>${severe}</b>stark eingeschränkt / bettlägerig</div>
+      <div><b>${severe}</b>stark (musste sich hinlegen)</div>
     </div>
     ${warns.length ? `<div class="warnbox">⚠ Letzte 30 Tage: ${warns.join(' ')}</div>` : ''}
 
@@ -1493,13 +1467,12 @@ function buildReport() {
     ${triggers.length ? `<h2>Häufigste Auslöser</h2><p>${triggers.map(([k, n]) => `${esc(k)} (${n}×)`).join(', ')}</p>` : ''}
 
     <h2>Alle Attacken</h2>
-    ${list.length ? `<div class="tbl"><table><thead><tr><th>Beginn</th><th>Dauer</th><th>Stärke</th><th>Aura</th><th>Einschränkung</th><th>Symptome / Ort</th><th>Medikamente (Wirkung)</th><th>Auslöser / Notiz</th></tr></thead><tbody>
+    ${list.length ? `<div class="tbl"><table><thead><tr><th>Beginn</th><th>Dauer</th><th>Stärke</th><th>Aura</th><th>Symptome / Ort</th><th>Medikamente (Wirkung)</th><th>Auslöser / Notiz</th></tr></thead><tbody>
       ${list.map(a => `<tr>
         <td>${fmtDateTime(a.start)}</td>
         <td>${a.end ? fmtDuration(a) : 'läuft'}</td>
-        <td>${a.intensity || '–'}</td>
+        <td>${levelText(a.intensity)}</td>
         <td>${auraText(a)}</td>
-        <td>${a.impairment !== null && a.impairment !== undefined ? IMPAIRMENT[a.impairment] : '–'}</td>
         <td>${esc([...(a.symptoms || []), ...(a.locations || [])].join(', '))}</td>
         <td>${(a.meds || []).map(m => `${esc(medName(m))} ${fmtTime(m.time)}${m.effect !== null && m.effect !== undefined ? ` (${EFFECTS[m.effect]})` : ''}`).join('<br>')}</td>
         <td>${esc((a.triggers || []).join(', '))}${a.notes ? `<br><i>${esc(a.notes)}</i>` : ''}${a.weather ? `<br>${a.weather.pressure} hPa${a.weather.change24 !== null ? ` (${a.weather.change24 > 0 ? '+' : ''}${a.weather.change24}/24h)` : ''}` : ''}</td>
@@ -1530,6 +1503,25 @@ document.addEventListener('click', e => {
   const act = t.dataset.act;
   const id = t.dataset.id;
 
+  // Schmerzstärke: Stufe oder genauer Wert
+  if ((t.dataset.level !== undefined || t.dataset.fine) && t.closest('.level-picker')) {
+    const target = flow && !draft ? flowAttack() : draft;
+    if (target) {
+      if (t.dataset.fine) target.intensity = +t.dataset.fine;
+      else {
+        const l = LEVELS[+t.dataset.level];
+        if (levelOf(target.intensity) !== +t.dataset.level) target.intensity = l.def;
+      }
+      t.closest('.level-picker').outerHTML = levelPickerHTML(target.intensity);
+      if (flow && !draft) {
+        save();
+        const foot = $('.sheet-foot');
+        if (foot) foot.innerHTML = '<button class="btn primary" data-flow="next">Weiter</button>';
+      }
+    }
+    return;
+  }
+
   // Nachfrage zu einer vergessenen Attacke
   if (stale && t.dataset.stale && staleClick(t)) return;
 
@@ -1542,12 +1534,6 @@ document.addEventListener('click', e => {
       const v = t.dataset.aura === '1';
       draft.aura = draft.aura === v ? null : v;
       $$('[data-aura]').forEach(b => b.setAttribute('aria-pressed', (b.dataset.aura === '1') === draft.aura && draft.aura !== null));
-      return;
-    }
-    if (t.dataset.imp !== undefined) {
-      const v = +t.dataset.imp;
-      draft.impairment = draft.impairment === v ? null : v;
-      $$('[data-imp]').forEach(b => b.setAttribute('aria-pressed', +b.dataset.imp === draft.impairment));
       return;
     }
     if (t.parentElement.dataset.group && t.dataset.val !== undefined) {
@@ -1607,7 +1593,7 @@ document.addEventListener('click', e => {
       const a = state.attacks.find(x => x.id === id);
       if (!a) break;
       a.end = new Date().toISOString(); a.checkedAt = null; save(); render();
-      dialog('Attacke beendet. Möchtest du noch etwas ergänzen – Einschränkung, Schmerzort, Auslöser, Notiz?', { okText: 'Ja, ergänzen', cancelText: 'Nein, fertig' })
+      dialog('Attacke beendet. Möchtest du noch etwas ergänzen – Schmerzort, Auslöser, Notiz?', { okText: 'Ja, ergänzen', cancelText: 'Nein, fertig' })
         .then(more => { if (more) openFlow(a.id, 'end'); else toast('Alles gespeichert – gute Erholung'); });
       break;
     }
@@ -1680,27 +1666,11 @@ document.addEventListener('click', e => {
   }
 });
 
-document.addEventListener('pointerdown', e => {
-  const r = e.target.closest && e.target.closest('.pain-range');
-  if (!r) return;
-  const box = r.getBoundingClientRect();
-  const pct = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
-  r.value = Math.round(1 + pct * 9);
-  r.dispatchEvent(new Event('input', { bubbles: true }));
-});
-
 document.addEventListener('toggle', e => {
   if (draft && e.target.dataset && e.target.dataset.fold) draft._open[e.target.dataset.fold] = e.target.open;
 }, true);
 
 document.addEventListener('input', e => {
-  if (e.target.classList.contains('pain-range')) {
-    const v = updatePainSlider(e.target);
-    if (draft && e.target.closest('#sheet') && !flow) draft.intensity = v;
-    const a = flow && flowAttack();
-    if (a) { a.intensity = v; save(); }
-    return;
-  }
   if (e.target.id !== 'm-search') return;
   const q = e.target.value.trim().toLowerCase();
   $$('#m-sugg .sugg-group').forEach(g => {
