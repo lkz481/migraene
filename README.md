@@ -48,7 +48,7 @@ Kostenlose Web-App fürs iPhone. Keine Werbung, kein Konto. Alle Daten bleiben a
 ## Für Entwickler: Updates veröffentlichen
 
 Geänderte Dateien auf GitHub hochladen. Damit iPhones das Update sicher bekommen, in `sw.js`
-die Zeile `const VERSION = 'migraene-v…'` hochzählen.
+die Zeile `const VERSION = 'migraene-v…'` hochzählen. Der Service Worker löscht nur eigene alte Caches (`migraene-…`), damit die Zyklus-App unter derselben Adresse nicht betroffen ist.
 
 ## Schrift
 
