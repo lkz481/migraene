@@ -403,7 +403,7 @@ async function fetchWeather(when) {
   const ageDays = (Date.now() - t) / 86400000;
   const host = ageDays > 80 ? 'https://archive-api.open-meteo.com/v1/archive' : 'https://api.open-meteo.com/v1/forecast';
   const url = `${host}?latitude=${c.lat}&longitude=${c.lon}&hourly=surface_pressure,temperature_2m,relative_humidity_2m`
-    + `&start_date=${dayKey(prev)}&end_date=${dayKey(t)}&timezone=auto`;
+    + `&start_date=${dayKey(prev)}&end_date=${dayKey(t)}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone || 'auto')}`;
   const res = await fetch(url, { referrerPolicy: 'no-referrer', credentials: 'omit', cache: 'no-store' });
   if (!res.ok) throw new Error('Wetterdienst nicht erreichbar');
   const data = await res.json();
@@ -721,7 +721,7 @@ function viewStats() {
 function viewSettings() {
   const meds = state.meds.map(m => `
     <button class="entry entry-plain" data-act="editmed" data-id="${m.id}">
-      <span class="entry-main"><span class="t">${esc(m.name)}</span><span class="s">${MED_TYPES[m.type]}${m.since ? ' · seit ' + new Date(m.since).toLocaleDateString('de-DE') : ''}</span></span>
+      <span class="entry-main"><span class="t">${esc(m.name)}</span><span class="s">${MED_TYPES[m.type]}${m.since ? ' · seit ' + new Date(m.since + 'T00:00').toLocaleDateString('de-DE') : ''}</span></span>
       <span class="muted">›</span></button>`).join('');
   const lb = state.settings.lastBackup ? new Date(state.settings.lastBackup).toLocaleDateString('de-DE') : 'noch nie';
   return `
@@ -935,6 +935,7 @@ function closeSheet() {
   $('#sheet').innerHTML = '';
   document.body.style.overflow = '';
   draft = null;
+  if (lockPending) { save().then(lockNow); return; }
   render();
 }
 
@@ -946,6 +947,7 @@ const FLOWS = {
   meds: ['meds']                                     // nur Medikament nachtragen
 };
 let flow = null;   // { id, kind, step, more }
+let flowTimer = 0;
 
 function flowAttack() { return flow && state.attacks.find(a => a.id === flow.id); }
 
@@ -1060,6 +1062,7 @@ function renderFlow() {
 }
 
 function flowNext() {
+  clearTimeout(flowTimer);
   const a = flowAttack();
   const note = $('#flow-notes');
   if (a && note) { a.notes = note.value.trim().slice(0, 4000); save(); }
@@ -1078,7 +1081,10 @@ function flowClick(t) {
     else a[k] = +v;
     save();
     $$(`[data-fset="${k}"]`).forEach(b => b.setAttribute('aria-pressed', b === t && v !== ''));
-    setTimeout(flowNext, 180);   // kurze Rückmeldung, dann automatisch weiter
+    // kurze Rückmeldung, dann automatisch weiter – nur einmal, auch bei schnellem Doppeltippen
+    clearTimeout(flowTimer);
+    const step = flow.step;
+    flowTimer = setTimeout(() => { if (flow && flow.step === step) flowNext(); }, 180);
     return true;
   }
   if (t.dataset.fchip) {
@@ -1347,9 +1353,13 @@ function showLock(stored) {
 }
 
 let hiddenAt = 0;
+let lockPending = false;
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) hiddenAt = Date.now();
-  else if (vault && hiddenAt && Date.now() - hiddenAt > AUTOLOCK_MS) lockNow();
+  else if (vault && hiddenAt && Date.now() - hiddenAt > AUTOLOCK_MS) {
+    // Ein offenes, noch nicht gespeichertes Formular nicht verwerfen – Sperre folgt beim Schließen
+    if (draft) lockPending = true; else lockNow();
+  }
   else checkStale();
 });
 
@@ -1359,13 +1369,13 @@ async function shareOrDownload(filename, content, mime) {
   const blob = new Blob([content], { type: mime });
   const file = new File([blob], filename, { type: mime });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: filename }); return true; } catch (e) { if (e.name === 'AbortError') return false; }
+    try { await navigator.share({ files: [file], title: filename }); return 'shared'; } catch (e) { if (e.name === 'AbortError') return false; }
   }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = filename; a.rel = 'noopener';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  return true;
+  return 'download';   // ob die Datei wirklich gespeichert wurde, ist nicht sicher
 }
 
 async function backup() {
@@ -1379,7 +1389,8 @@ async function backup() {
   const box = await sealJSON(state, await deriveKey(pw, salt, PBKDF2_ITER));
   const content = JSON.stringify({ app: 'migraene-tagebuch', format: 2, enc: 1, salt: toB64(salt), iter: PBKDF2_ITER, ...box });
   const ok = await shareOrDownload(`migraene-backup-${dayKey(new Date())}.json`, content, 'application/json');
-  if (ok) { state.settings.lastBackup = new Date().toISOString(); save(); render(); toast('Verschlüsseltes Backup erstellt'); }
+  if (ok === 'shared') { state.settings.lastBackup = new Date().toISOString(); save(); render(); toast('Verschlüsseltes Backup erstellt'); }
+  else if (ok === 'download') toast('Backup-Datei erstellt – bitte prüfen, ob sie in „Dateien“ gespeichert wurde.');
 }
 
 function restore(file) {
@@ -1462,7 +1473,7 @@ function buildReport() {
     <div class="tbl"><table><thead><tr><th>Monat</th><th>Kopfschmerztage</th><th>Attacken</th><th>davon mit Aura</th><th>Tage Triptan</th><th>Tage Schmerzmittel</th></tr></thead>
     <tbody>${monthRows.join('')}</tbody></table></div>
 
-    ${proph.length ? `<h2>Prophylaxe</h2><ul>${proph.map(m => `<li>${esc(m.name)}${m.since ? ` (seit ${new Date(m.since).toLocaleDateString('de-DE')})` : ''}</li>`).join('')}</ul>` : ''}
+    ${proph.length ? `<h2>Prophylaxe</h2><ul>${proph.map(m => `<li>${esc(m.name)}${m.since ? ` (seit ${new Date(m.since + 'T00:00').toLocaleDateString('de-DE')})` : ''}</li>`).join('')}</ul>` : ''}
 
     ${triggers.length ? `<h2>Häufigste Auslöser</h2><p>${triggers.map(([k, n]) => `${esc(k)} (${n}×)`).join(', ')}</p>` : ''}
 
@@ -1750,6 +1761,14 @@ function start() {
 (function boot() {
   const stored = readStored();
   if (stored && stored.enc === 1 && stored.salt && stored.iv && stored.ct) { showLock(stored); return; }
+  if (stored && typeof stored === 'object' && 'enc' in stored) {
+    // Verschlüsselte Daten sind unvollständig: beiseitelegen statt mit leeren Daten zu überschreiben
+    try { localStorage.setItem(STORE_KEY + '-beschaedigt-' + Date.now(), JSON.stringify(stored)); } catch (e) { /* voll */ }
+    state = sanitizeState(null);
+    start();
+    toast('Die gespeicherten Daten sind beschädigt. Bitte ein Backup wiederherstellen.');
+    return;
+  }
   state = sanitizeState(stored);
   if (stored) save();   // alte Daten einmal im geprüften Format speichern
   start();
